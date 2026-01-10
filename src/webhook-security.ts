@@ -33,10 +33,12 @@ export function validateTwilioSignature(
   // Build the string to sign: URL + sorted params
   let dataToSign = url;
 
-  // Sort params alphabetically and append name+value
-  const sortedParams = Array.from(params.entries()).sort((a, b) =>
-    a[0].localeCompare(b[0])
-  );
+  // Sort params alphabetically using ASCII order (case-sensitive, as Twilio requires)
+  const sortedParams = Array.from(params.entries()).sort((a, b) => {
+    if (a[0] < b[0]) return -1;
+    if (a[0] > b[0]) return 1;
+    return 0;
+  });
 
   for (const [key, value] of sortedParams) {
     dataToSign += key + value;
