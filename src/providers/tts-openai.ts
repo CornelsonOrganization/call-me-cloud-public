@@ -21,7 +21,11 @@ export class OpenAITTSProvider implements TTSProvider {
       throw new Error('OpenAI API key required for TTS');
     }
 
-    this.client = new OpenAI({ apiKey: config.apiKey });
+    // Use US regional endpoint if specified (required for some API keys)
+    const baseURL = process.env.OPENAI_API_BASE_URL
+      ? process.env.OPENAI_API_BASE_URL.replace('wss://', 'https://')
+      : undefined;
+    this.client = new OpenAI({ apiKey: config.apiKey, baseURL });
     this.voice = config.voice || 'onyx';
     this.model = config.model || 'tts-1';
 

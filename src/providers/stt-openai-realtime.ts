@@ -60,7 +60,9 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
 
   private async doConnect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = 'wss://api.openai.com/v1/realtime?intent=transcription';
+      // Use US regional endpoint (required for some API keys)
+      const baseUrl = process.env.OPENAI_API_BASE_URL || 'wss://api.openai.com';
+      const url = `${baseUrl}/v1/realtime?intent=transcription`;
 
       this.ws = new WebSocket(url, {
         headers: {
