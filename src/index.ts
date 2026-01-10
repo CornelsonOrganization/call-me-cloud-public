@@ -12,7 +12,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 
 const port = parseInt(process.env.PORT || '3333', 10);
-const API_KEY = process.env.CALLME_API_KEY || 'change-me-in-production';
+const API_KEY = process.env.CALLME_API_KEY;
 
 // Start HTTP server immediately for health checks
 const server = createServer();
@@ -20,7 +20,14 @@ let callManager: any = null;
 let publicUrl = '';
 let configError = '';
 
+// Validate required API key at startup
+if (!API_KEY) {
+  configError = 'Missing required CALLME_API_KEY environment variable';
+  console.error(`FATAL: ${configError}`);
+}
+
 function authenticate(req: IncomingMessage): boolean {
+  if (!API_KEY) return false;  // Fail closed if API key not configured
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) return false;
   return authHeader.slice(7) === API_KEY;

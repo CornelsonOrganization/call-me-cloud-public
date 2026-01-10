@@ -127,5 +127,10 @@ export function validateProviderConfig(config: ProviderConfig): string[] {
     errors.push('Missing CALLME_OPENAI_API_KEY');
   }
 
+  // Require Telnyx public key for webhook signature verification
+  if (config.phoneProvider === 'telnyx' && !config.telnyxPublicKey) {
+    errors.push('Missing CALLME_TELNYX_PUBLIC_KEY (required for webhook signature verification)');
+  }
+
   return errors;
 }

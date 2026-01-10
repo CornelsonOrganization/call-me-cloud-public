@@ -105,27 +105,32 @@ export class CallManager {
         const token = url.searchParams.get('token');
         let callId = token ? this.wsTokenToCallId.get(token) : null;
 
-        if (token && callId) {
-          const state = this.activeCalls.get(callId);
-          if (!state || !validateWebSocketToken(state.wsToken, token)) {
-            console.error('[Security] Rejecting WebSocket: token validation failed');
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-            socket.destroy();
-            return;
-          }
-          console.error(`[Security] WebSocket token validated for call ${callId}`);
-        } else if (!callId) {
-          const activeCallIds = Array.from(this.activeCalls.keys());
-          if (activeCallIds.length > 0) {
-            callId = activeCallIds[activeCallIds.length - 1];
-            console.error(`[WebSocket] Token not found, using fallback call ID: ${callId}`);
-          } else {
-            callId = `pending-${Date.now()}`;
-            console.error(`[WebSocket] No active calls, using placeholder: ${callId}`);
-          }
+        // Reject if no token provided
+        if (!token) {
+          console.error('[Security] Rejecting WebSocket: missing token');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
         }
 
-        console.error(`[WebSocket] Accepting connection for: ${callId}`);
+        // Look up call ID from token
+        if (!callId) {
+          console.error('[Security] Rejecting WebSocket: token not recognized');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        // Validate token matches the call state
+        const state = this.activeCalls.get(callId);
+        if (!state || !validateWebSocketToken(state.wsToken, token)) {
+          console.error('[Security] Rejecting WebSocket: token validation failed');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        console.error(`[Security] WebSocket token validated for call ${callId}`);
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
           this.wss!.emit('connection', ws, request, callId);
         });
@@ -214,47 +219,32 @@ export class CallManager {
         const token = url.searchParams.get('token');
         let callId = token ? this.wsTokenToCallId.get(token) : null;
 
-        // Validate token if provided
-        if (token && callId) {
-          const state = this.activeCalls.get(callId);
-          if (!state || !validateWebSocketToken(state.wsToken, token)) {
-            console.error('[Security] Rejecting WebSocket: token validation failed');
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-            socket.destroy();
-            return;
-          }
-          console.error(`[Security] WebSocket token validated for call ${callId}`);
-        } else if (!callId) {
-          // Token missing or not found - allow fallback for cloud deployments
-          const isCloudDeployment =
-            new URL(this.config.publicUrl).hostname.endsWith('.ngrok-free.dev') ||
-            new URL(this.config.publicUrl).hostname.endsWith('.railway.app') ||
-            new URL(this.config.publicUrl).hostname.endsWith('.onrender.com') ||
-            process.env.CALLME_SKIP_SIGNATURE_VALIDATION === 'true';
-
-          if (isCloudDeployment) {
-            // Fallback: find the most recent active call (cloud compatibility mode)
-            // Token lookup can fail due to timing issues with cloud deployments
-            const activeCallIds = Array.from(this.activeCalls.keys());
-            if (activeCallIds.length > 0) {
-              callId = activeCallIds[activeCallIds.length - 1];
-              console.error(`[WebSocket] Token not found, using fallback call ID: ${callId} (cloud compatibility mode)`);
-            } else {
-              // No active calls yet - create a placeholder and accept anyway
-              // The connection handler will associate it with the correct call
-              callId = `pending-${Date.now()}`;
-              console.error(`[WebSocket] No active calls, using placeholder: ${callId} (cloud compatibility mode)`);
-            }
-          } else {
-            console.error('[Security] Rejecting WebSocket: missing or invalid token');
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-            socket.destroy();
-            return;
-          }
+        // Reject if no token provided
+        if (!token) {
+          console.error('[Security] Rejecting WebSocket: missing token');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
         }
 
-        // Accept WebSocket connection
-        console.error(`[WebSocket] Accepting connection for: ${callId}`);
+        // Look up call ID from token
+        if (!callId) {
+          console.error('[Security] Rejecting WebSocket: token not recognized');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        // Validate token matches the call state
+        const state = this.activeCalls.get(callId);
+        if (!state || !validateWebSocketToken(state.wsToken, token)) {
+          console.error('[Security] Rejecting WebSocket: token validation failed');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        console.error(`[Security] WebSocket token validated for call ${callId}`);
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
           this.wss!.emit('connection', ws, request, callId);
         });
@@ -349,20 +339,23 @@ export class CallManager {
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', async () => {
         try {
-          // Validate Telnyx signature if public key is configured
+          // Validate Telnyx signature (required for security)
           const telnyxPublicKey = this.config.providerConfig.telnyxPublicKey;
-          if (telnyxPublicKey) {
-            const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
-            const timestamp = req.headers['telnyx-timestamp'] as string | undefined;
+          if (!telnyxPublicKey) {
+            console.error('[Security] Rejecting Telnyx webhook: CALLME_TELNYX_PUBLIC_KEY not configured');
+            res.writeHead(500);
+            res.end('Server misconfiguration: missing Telnyx public key');
+            return;
+          }
 
-            if (!validateTelnyxSignature(telnyxPublicKey, signature, timestamp, body)) {
-              console.error('[Security] Rejecting Telnyx webhook: invalid signature');
-              res.writeHead(401);
-              res.end('Invalid signature');
-              return;
-            }
-          } else {
-            console.error('[Security] Warning: CALLME_TELNYX_PUBLIC_KEY not set, skipping signature verification');
+          const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
+          const timestamp = req.headers['telnyx-timestamp'] as string | undefined;
+
+          if (!validateTelnyxSignature(telnyxPublicKey, signature, timestamp, body)) {
+            console.error('[Security] Rejecting Telnyx webhook: invalid signature');
+            res.writeHead(401);
+            res.end('Invalid signature');
+            return;
           }
 
           const event = JSON.parse(body);
@@ -392,22 +385,10 @@ export class CallManager {
           const webhookUrl = `${this.config.publicUrl}/twiml`;
 
           if (!validateTwilioSignature(authToken, signature, webhookUrl, params)) {
-            // Allow signature bypass for cloud deployments where URL reconstruction may fail
-            // Cloud platforms (Railway, Render, ngrok) can cause URL mismatches due to proxying
-            const isCloudDeployment =
-              new URL(this.config.publicUrl).hostname.endsWith('.ngrok-free.dev') ||
-              new URL(this.config.publicUrl).hostname.endsWith('.railway.app') ||
-              new URL(this.config.publicUrl).hostname.endsWith('.onrender.com') ||
-              process.env.CALLME_SKIP_SIGNATURE_VALIDATION === 'true';
-
-            if (isCloudDeployment) {
-              console.error('[Security] Twilio signature validation failed (proceeding anyway for cloud deployment compatibility)');
-            } else {
-              console.error('[Security] Rejecting Twilio webhook: invalid signature');
-              res.writeHead(401);
-              res.end('Invalid signature');
-              return;
-            }
+            console.error('[Security] Rejecting Twilio webhook: invalid signature');
+            res.writeHead(401);
+            res.end('Invalid signature');
+            return;
           }
 
           await this.handleTwilioWebhook(params, res);
