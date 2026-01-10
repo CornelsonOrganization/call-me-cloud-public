@@ -439,13 +439,18 @@ export class CallManager {
     // Find the call state to get the WebSocket token
     if (callSid) {
       const callId = this.callControlIdToCallId.get(callSid);
+      console.error(`[Debug] CallSid=${callSid}, callId=${callId}`);
       if (callId) {
         const state = this.activeCalls.get(callId);
+        console.error(`[Debug] state exists=${!!state}, wsToken exists=${!!(state?.wsToken)}`);
         if (state) {
           streamUrl += `?token=${encodeURIComponent(state.wsToken)}`;
         }
       }
+    } else {
+      console.error(`[Debug] No callSid in webhook`);
     }
+    console.error(`[Debug] Final streamUrl includes token: ${streamUrl.includes('token=')}`)
 
     const xml = this.config.providers.phone.getStreamConnectXml(streamUrl);
     res.writeHead(200, { 'Content-Type': 'application/xml' });
