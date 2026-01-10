@@ -1,0 +1,20 @@
+{
+  "name": "call-me-cloud",
+  "version": "1.0.0",
+  "description": "Cloud-hosted call-me server for VPN-restricted environments",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {
+    "openai": "^4.77.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.13",
+    "bun-types": "latest"
+  }
+}

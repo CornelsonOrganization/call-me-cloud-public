@@ -1,0 +1,16 @@
+{
+  "name": "call-me-mcp-client",
+  "version": "1.0.0",
+  "description": "Local MCP client that connects to call-me cloud server",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
