@@ -101,6 +101,7 @@ export class CallManager {
 
     this.httpServer.on('upgrade', (request: IncomingMessage, socket: any, head: Buffer) => {
       const url = new URL(request.url!, `http://${request.headers.host}`);
+      console.error(`[Debug] WebSocket upgrade request URL: ${request.url}`);
       if (url.pathname === '/media-stream') {
         const token = url.searchParams.get('token');
         let callId = token ? this.wsTokenToCallId.get(token) : null;
@@ -450,9 +451,10 @@ export class CallManager {
     } else {
       console.error(`[Debug] No callSid in webhook`);
     }
-    console.error(`[Debug] Final streamUrl includes token: ${streamUrl.includes('token=')}`)
+    console.error(`[Debug] Final streamUrl: ${streamUrl}`)
 
     const xml = this.config.providers.phone.getStreamConnectXml(streamUrl);
+    console.error(`[Debug] TwiML response: ${xml}`);
     res.writeHead(200, { 'Content-Type': 'application/xml' });
     res.end(xml);
   }
