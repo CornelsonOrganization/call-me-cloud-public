@@ -107,8 +107,8 @@ server.on('request', async (req: IncomingMessage, res: ServerResponse) => {
           jsonResponse(res, 400, { error: 'message is required' });
           return;
         }
-        const response = await callManager.continueCall(callId, message);
-        jsonResponse(res, 200, { response });
+        const result = await callManager.continueCall(callId, message);
+        jsonResponse(res, 200, result);
         return;
       }
 
@@ -120,8 +120,8 @@ server.on('request', async (req: IncomingMessage, res: ServerResponse) => {
           jsonResponse(res, 400, { error: 'message is required' });
           return;
         }
-        await callManager.speakOnly(callId, message);
-        jsonResponse(res, 200, { success: true });
+        const result = await callManager.speakOnly(callId, message);
+        jsonResponse(res, 200, result);
         return;
       }
 

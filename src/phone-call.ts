@@ -27,6 +27,9 @@ interface CallState {
   startTime: number;
   hungUp: boolean;
   sttSession: RealtimeSTTSession | null;
+  // Barge-in (interruption) state
+  isSpeaking: boolean;  // True while TTS audio is being sent
+  interrupted: boolean;  // True if user interrupted during TTS playback
 }
 
 export interface ServerConfig {
@@ -535,7 +538,7 @@ export class CallManager {
     }
   }
 
-  async initiateCall(message: string): Promise<{ callId: string; response: string }> {
+  async initiateCall(message: string): Promise<{ callId: string; response: string; interrupted: boolean }> {
     const callId = `call-${++this.currentCallId}-${Date.now()}`;
 
     // Create realtime transcription session via provider
@@ -558,7 +561,18 @@ export class CallManager {
       startTime: Date.now(),
       hungUp: false,
       sttSession,
+      isSpeaking: false,
+      interrupted: false,
     };
+
+    // Set up barge-in detection: when speech is detected during TTS playback, interrupt
+    sttSession.onSpeechStart(() => {
+      if (state.isSpeaking && !state.interrupted) {
+        console.error(`[${callId}] Barge-in detected! User started speaking during TTS playback`);
+        state.interrupted = true;
+        this.clearAudioBuffer(state);
+      }
+    });
 
     this.activeCalls.set(callId, state);
 
@@ -584,11 +598,12 @@ export class CallManager {
       // Send the pre-generated audio and listen for response
       const audioData = await ttsPromise;
       await this.sendPreGeneratedAudio(state, audioData);
+      const wasInterrupted = state.interrupted;
       const response = await this.listen(state);
       state.conversationHistory.push({ speaker: 'claude', message });
       state.conversationHistory.push({ speaker: 'user', message: response });
 
-      return { callId, response };
+      return { callId, response, interrupted: wasInterrupted };
     } catch (error) {
       state.sttSession?.close();
       this.activeCalls.delete(callId);
@@ -596,23 +611,24 @@ export class CallManager {
     }
   }
 
-  async continueCall(callId: string, message: string): Promise<string> {
+  async continueCall(callId: string, message: string): Promise<{ response: string; interrupted: boolean }> {
     const state = this.activeCalls.get(callId);
     if (!state) throw new Error(`No active call: ${callId}`);
 
-    const response = await this.speakAndListen(state, message);
+    const { response, interrupted } = await this.speakAndListen(state, message);
     state.conversationHistory.push({ speaker: 'claude', message });
     state.conversationHistory.push({ speaker: 'user', message: response });
 
-    return response;
+    return { response, interrupted };
   }
 
-  async speakOnly(callId: string, message: string): Promise<void> {
+  async speakOnly(callId: string, message: string): Promise<{ interrupted: boolean }> {
     const state = this.activeCalls.get(callId);
     if (!state) throw new Error(`No active call: ${callId}`);
 
     await this.speak(state, message);
     state.conversationHistory.push({ speaker: 'claude', message });
+    return { interrupted: state.interrupted };
   }
 
   async endCall(callId: string, message: string): Promise<{ durationSeconds: number }> {
@@ -692,38 +708,81 @@ export class CallManager {
     state.ws.send(JSON.stringify(message));
   }
 
-  private async sendPreGeneratedAudio(state: CallState, muLawData: Buffer): Promise<void> {
-    console.error(`[${state.callId}] Sending pre-generated audio...`);
-    const chunkSize = 160;  // 20ms at 8kHz
-    for (let i = 0; i < muLawData.length; i += chunkSize) {
-      this.sendMediaChunk(state, muLawData.subarray(i, i + chunkSize));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+  /**
+   * Clear the Twilio audio buffer (used for barge-in to stop current playback)
+   */
+  private clearAudioBuffer(state: CallState): void {
+    if (state.ws?.readyState !== WebSocket.OPEN) return;
+    const message: Record<string, unknown> = {
+      event: 'clear',
+    };
+    if (state.streamSid) {
+      message.streamSid = state.streamSid;
     }
-    // Small delay to ensure audio finishes playing before listening
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    console.error(`[${state.callId}] Audio sent`);
+    state.ws.send(JSON.stringify(message));
+    console.error(`[${state.callId}] Cleared audio buffer (barge-in)`);
   }
 
-  private async speakAndListen(state: CallState, text: string): Promise<string> {
+  private async sendPreGeneratedAudio(state: CallState, muLawData: Buffer): Promise<void> {
+    console.error(`[${state.callId}] Sending pre-generated audio...`);
+
+    // Set up interruption state for barge-in detection
+    state.interrupted = false;
+    state.isSpeaking = true;
+
+    try {
+      const chunkSize = 160;  // 20ms at 8kHz
+      for (let i = 0; i < muLawData.length; i += chunkSize) {
+        // Check for barge-in interruption
+        if (state.interrupted) {
+          console.error(`[${state.callId}] Pre-generated audio interrupted by barge-in`);
+          return;
+        }
+        this.sendMediaChunk(state, muLawData.subarray(i, i + chunkSize));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      // Small delay to ensure audio finishes playing before listening
+      if (!state.interrupted) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      console.error(`[${state.callId}] Audio sent${state.interrupted ? ' (interrupted)' : ''}`);
+    } finally {
+      state.isSpeaking = false;
+    }
+  }
+
+  private async speakAndListen(state: CallState, text: string): Promise<{ response: string; interrupted: boolean }> {
     await this.speak(state, text);
-    return await this.listen(state);
+    const interrupted = state.interrupted;
+    const response = await this.listen(state);
+    return { response, interrupted };
   }
 
   private async speak(state: CallState, text: string): Promise<void> {
     console.error(`[${state.callId}] Speaking: ${text.substring(0, 50)}...`);
 
-    const tts = this.config.providers.tts;
+    // Reset interruption state for barge-in detection
+    state.interrupted = false;
+    state.isSpeaking = true;
 
-    // Use streaming if available for lower latency
-    if (tts.synthesizeStream) {
-      await this.speakStreaming(state, text, tts.synthesizeStream.bind(tts));
-    } else {
-      const pcmData = await tts.synthesize(text);
-      await this.sendAudio(state, pcmData);
+    try {
+      const tts = this.config.providers.tts;
+
+      // Use streaming if available for lower latency
+      if (tts.synthesizeStream) {
+        await this.speakStreaming(state, text, tts.synthesizeStream.bind(tts));
+      } else {
+        const pcmData = await tts.synthesize(text);
+        await this.sendAudio(state, pcmData);
+      }
+
+      if (!state.interrupted) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      console.error(`[${state.callId}] Speaking done${state.interrupted ? ' (interrupted)' : ''}`);
+    } finally {
+      state.isSpeaking = false;
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    console.error(`[${state.callId}] Speaking done`);
   }
 
   private async speakStreaming(
@@ -743,44 +802,61 @@ export class CallManager {
     const JITTER_BUFFER_SIZE = (8000 / 1000) * JITTER_BUFFER_MS; // 800 bytes at 8kHz mu-law
     let playbackStarted = false;
 
-    // Helper to drain and send buffered mu-law audio in chunks
+    // Helper to drain and send buffered mu-law audio in chunks (interruptible)
     const drainBuffer = async () => {
       while (pendingMuLaw.length >= OUTPUT_CHUNK_SIZE) {
+        // Check for barge-in interruption
+        if (state.interrupted) {
+          pendingMuLaw = Buffer.alloc(0);
+          return;
+        }
         this.sendMediaChunk(state, pendingMuLaw.subarray(0, OUTPUT_CHUNK_SIZE));
         pendingMuLaw = pendingMuLaw.subarray(OUTPUT_CHUNK_SIZE);
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     };
 
-    for await (const chunk of synthesizeStream(text)) {
-      pendingPcm = Buffer.concat([pendingPcm, chunk]);
-
-      const completeUnits = Math.floor(pendingPcm.length / SAMPLES_PER_RESAMPLE);
-      if (completeUnits > 0) {
-        const bytesToProcess = completeUnits * SAMPLES_PER_RESAMPLE;
-        const toProcess = pendingPcm.subarray(0, bytesToProcess);
-        pendingPcm = pendingPcm.subarray(bytesToProcess);
-
-        const resampled = this.resample24kTo8k(toProcess);
-        const muLaw = this.pcmToMuLaw(resampled);
-        pendingMuLaw = Buffer.concat([pendingMuLaw, muLaw]);
-
-        // Wait for jitter buffer to fill before starting playback
-        if (!playbackStarted && pendingMuLaw.length < JITTER_BUFFER_SIZE) {
-          continue;
+    const stream = synthesizeStream(text);
+    try {
+      for await (const chunk of stream) {
+        // Check for barge-in interruption
+        if (state.interrupted) {
+          console.error(`[${state.callId}] TTS stream interrupted by barge-in`);
+          break;
         }
-        playbackStarted = true;
 
-        await drainBuffer();
+        pendingPcm = Buffer.concat([pendingPcm, chunk]);
+
+        const completeUnits = Math.floor(pendingPcm.length / SAMPLES_PER_RESAMPLE);
+        if (completeUnits > 0) {
+          const bytesToProcess = completeUnits * SAMPLES_PER_RESAMPLE;
+          const toProcess = pendingPcm.subarray(0, bytesToProcess);
+          pendingPcm = pendingPcm.subarray(bytesToProcess);
+
+          const resampled = this.resample24kTo8k(toProcess);
+          const muLaw = this.pcmToMuLaw(resampled);
+          pendingMuLaw = Buffer.concat([pendingMuLaw, muLaw]);
+
+          // Wait for jitter buffer to fill before starting playback
+          if (!playbackStarted && pendingMuLaw.length < JITTER_BUFFER_SIZE) {
+            continue;
+          }
+          playbackStarted = true;
+
+          await drainBuffer();
+        }
       }
-    }
+    } finally {
+      // Try to clean up the stream if it supports return()
+      if (!state.interrupted) {
+        // Send remaining audio (including any buffered audio for short messages)
+        await drainBuffer();
 
-    // Send remaining audio (including any buffered audio for short messages)
-    await drainBuffer();
-
-    // Send any final partial chunk
-    if (pendingMuLaw.length > 0) {
-      this.sendMediaChunk(state, pendingMuLaw);
+        // Send any final partial chunk
+        if (pendingMuLaw.length > 0) {
+          this.sendMediaChunk(state, pendingMuLaw);
+        }
+      }
     }
   }
 
@@ -790,6 +866,11 @@ export class CallManager {
 
     const chunkSize = 160;
     for (let i = 0; i < muLawData.length; i += chunkSize) {
+      // Check for barge-in interruption
+      if (state.interrupted) {
+        console.error(`[${state.callId}] Audio sending interrupted by barge-in`);
+        return;
+      }
       this.sendMediaChunk(state, muLawData.subarray(i, i + chunkSize));
       await new Promise((resolve) => setTimeout(resolve, 20));
     }

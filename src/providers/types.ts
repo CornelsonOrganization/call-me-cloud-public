@@ -89,6 +89,17 @@ export interface RealtimeSTTSession {
   onPartial(callback: (partial: string) => void): void;
 
   /**
+   * Set callback for when speech is detected (VAD)
+   * Used for barge-in detection during TTS playback
+   */
+  onSpeechStart(callback: () => void): void;
+
+  /**
+   * Set callback for when speech ends (VAD)
+   */
+  onSpeechEnd(callback: () => void): void;
+
+  /**
    * Close the session
    */
   close(): void;

@@ -41,6 +41,8 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
   private pendingTranscript = '';
   private onTranscriptCallback: ((transcript: string) => void) | null = null;
   private onPartialCallback: ((partial: string) => void) | null = null;
+  private onSpeechStartCallback: (() => void) | null = null;
+  private onSpeechEndCallback: (() => void) | null = null;
   private closed = false;  // True when intentionally closed
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -184,10 +186,12 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
       case 'input_audio_buffer.speech_started':
         console.error('[RealtimeSTT] Speech started');
         this.pendingTranscript = '';
+        this.onSpeechStartCallback?.();
         break;
 
       case 'input_audio_buffer.speech_stopped':
         console.error('[RealtimeSTT] Speech stopped');
+        this.onSpeechEndCallback?.();
         break;
 
       case 'input_audio_buffer.committed':
@@ -218,6 +222,14 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
     this.onPartialCallback = callback;
   }
 
+  onSpeechStart(callback: () => void): void {
+    this.onSpeechStartCallback = callback;
+  }
+
+  onSpeechEnd(callback: () => void): void {
+    this.onSpeechEndCallback = callback;
+  }
+
   async waitForTranscript(timeoutMs: number = 30000): Promise<string> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -240,6 +252,11 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
       this.ws = null;
     }
     this.connected = false;
+    // Clear all callbacks to prevent memory leaks
+    this.onTranscriptCallback = null;
+    this.onPartialCallback = null;
+    this.onSpeechStartCallback = null;
+    this.onSpeechEndCallback = null;
   }
 
   isConnected(): boolean {
