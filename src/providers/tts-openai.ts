@@ -21,10 +21,10 @@ export class OpenAITTSProvider implements TTSProvider {
       throw new Error('OpenAI API key required for TTS');
     }
 
-    // Use US regional endpoint if specified (required for some API keys)
-    const baseURL = process.env.OPENAI_API_BASE_URL
-      ? process.env.OPENAI_API_BASE_URL.replace('wss://', 'https://')
-      : undefined;
+    // TTS uses separate endpoint from Realtime API
+    // OPENAI_TTS_BASE_URL can override if needed, but defaults to standard endpoint
+    // Note: OPENAI_API_BASE_URL is for Realtime STT only (regional endpoints like us.api.openai.com)
+    const baseURL = process.env.OPENAI_TTS_BASE_URL || undefined;
     this.client = new OpenAI({ apiKey: config.apiKey, baseURL });
     this.voice = config.voice || 'onyx';
     this.model = config.model || 'tts-1';
