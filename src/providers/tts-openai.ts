@@ -46,7 +46,7 @@ export class OpenAITTSProvider implements TTSProvider {
 
     const response = await this.client.audio.speech.create({
       model: this.model,
-      voice: this.voice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+      voice: this.voice as 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'verse',
       input: text,
       response_format: 'pcm',
       speed: 1.0,
@@ -65,7 +65,7 @@ export class OpenAITTSProvider implements TTSProvider {
 
     const response = await this.client.audio.speech.create({
       model: this.model,
-      voice: this.voice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+      voice: this.voice as 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'verse',
       input: text,
       response_format: 'pcm',
       speed: 1.0,
