@@ -115,10 +115,17 @@ export class TwilioPhoneProvider implements PhoneProvider {
     // - Automatically receives only inbound audio (user's voice) for STT
     // - Allows sending audio back via WebSocket media messages
     // Note: "track" attribute is NOT valid for <Connect><Stream>, only for <Start><Stream>
+    // Note: Twilio strips query params from URLs, so we pass token via <Parameter>
+    const url = new URL(streamUrl);
+    const token = url.searchParams.get('token') || '';
+    const baseUrl = `${url.protocol}//${url.host}${url.pathname}`;
+
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${streamUrl}" />
+    <Stream url="${baseUrl}">
+      <Parameter name="token" value="${token}" />
+    </Stream>
   </Connect>
 </Response>`;
   }

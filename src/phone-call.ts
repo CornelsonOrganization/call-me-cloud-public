@@ -104,53 +104,59 @@ export class CallManager {
       console.error(`[Debug] WebSocket upgrade request URL: ${request.url}`);
       if (url.pathname === '/media-stream') {
         const token = url.searchParams.get('token');
-        let callId = token ? this.wsTokenToCallId.get(token) : null;
 
-        // Reject if no token provided
-        if (!token) {
-          console.error('[Security] Rejecting WebSocket: missing token');
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
+        // If token in URL (e.g., Telnyx), validate immediately
+        if (token) {
+          const callId = this.wsTokenToCallId.get(token);
+          if (!callId) {
+            console.error('[Security] Rejecting WebSocket: token not recognized');
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+
+          const state = this.activeCalls.get(callId);
+          if (!state || !validateWebSocketToken(state.wsToken, token)) {
+            console.error('[Security] Rejecting WebSocket: token validation failed');
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+
+          console.error(`[Security] WebSocket token validated for call ${callId}`);
+          this.wss!.handleUpgrade(request, socket, head, (ws) => {
+            this.wss!.emit('connection', ws, request, callId);
+          });
+        } else {
+          // No token in URL (Twilio) - accept connection, validate from start message
+          // Token will be in customParameters of the "start" message
+          console.error('[Security] WebSocket connection accepted, awaiting token in start message');
+          this.wss!.handleUpgrade(request, socket, head, (ws) => {
+            this.wss!.emit('connection', ws, request, null);  // null callId until validated
+          });
         }
-
-        // Look up call ID from token
-        if (!callId) {
-          console.error('[Security] Rejecting WebSocket: token not recognized');
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-
-        // Validate token matches the call state
-        const state = this.activeCalls.get(callId);
-        if (!state || !validateWebSocketToken(state.wsToken, token)) {
-          console.error('[Security] Rejecting WebSocket: token validation failed');
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-
-        console.error(`[Security] WebSocket token validated for call ${callId}`);
-        this.wss!.handleUpgrade(request, socket, head, (ws) => {
-          this.wss!.emit('connection', ws, request, callId);
-        });
       } else {
         socket.destroy();
       }
     });
 
-    this.wss.on('connection', (ws: WebSocket, _request: IncomingMessage, callId: string) => {
+    this.wss.on('connection', (ws: WebSocket, _request: IncomingMessage, callId: string | null) => {
       this.handleWebSocketConnection(ws, callId);
     });
   }
 
-  private handleWebSocketConnection(ws: WebSocket, callId: string): void {
-    console.error(`Media stream WebSocket connected for call ${callId}`);
+  private handleWebSocketConnection(ws: WebSocket, callId: string | null): void {
+    console.error(`Media stream WebSocket connected for call ${callId || '(pending validation)'}`);
 
-    const state = this.activeCalls.get(callId);
-    if (state) {
-      state.ws = ws;
+    // Track the validated callId (may be set later for Twilio)
+    let validatedCallId = callId;
+
+    // If callId already known, bind the WebSocket
+    if (validatedCallId) {
+      const state = this.activeCalls.get(validatedCallId);
+      if (state) {
+        state.ws = ws;
+      }
     }
 
     ws.on('message', (message: Buffer | string) => {
@@ -159,25 +165,60 @@ export class CallManager {
       if (msgBuffer.length > 0 && msgBuffer[0] === 0x7b) {
         try {
           const msg = JSON.parse(msgBuffer.toString());
-          const msgState = this.activeCalls.get(callId);
 
-          if (msg.event === 'start' && msg.streamSid && msgState) {
-            msgState.streamSid = msg.streamSid;
-            console.error(`[${callId}] Captured streamSid: ${msg.streamSid}`);
+          // Handle Twilio "start" message - validate token from customParameters
+          if (msg.event === 'start') {
+            // For Twilio, token is in customParameters
+            if (!validatedCallId && msg.start?.customParameters?.token) {
+              const token = msg.start.customParameters.token;
+              const foundCallId = this.wsTokenToCallId.get(token);
+
+              if (!foundCallId) {
+                console.error('[Security] Rejecting WebSocket: token from start message not recognized');
+                ws.close(1008, 'Invalid token');
+                return;
+              }
+
+              const state = this.activeCalls.get(foundCallId);
+              if (!state || !validateWebSocketToken(state.wsToken, token)) {
+                console.error('[Security] Rejecting WebSocket: token validation failed');
+                ws.close(1008, 'Invalid token');
+                return;
+              }
+
+              console.error(`[Security] WebSocket token validated from start message for call ${foundCallId}`);
+              validatedCallId = foundCallId;
+              state.ws = ws;
+            }
+
+            // Capture streamSid
+            if (msg.streamSid && validatedCallId) {
+              const msgState = this.activeCalls.get(validatedCallId);
+              if (msgState) {
+                msgState.streamSid = msg.streamSid;
+                console.error(`[${validatedCallId}] Captured streamSid: ${msg.streamSid}`);
+              }
+            }
           }
 
-          if (msg.event === 'stop' && msgState) {
-            console.error(`[${callId}] Stream stopped`);
-            msgState.hungUp = true;
+          if (msg.event === 'stop' && validatedCallId) {
+            const msgState = this.activeCalls.get(validatedCallId);
+            if (msgState) {
+              console.error(`[${validatedCallId}] Stream stopped`);
+              msgState.hungUp = true;
+            }
           }
         } catch { }
       }
 
-      const audioState = this.activeCalls.get(callId);
-      if (audioState?.sttSession) {
-        const audioData = this.extractInboundAudio(msgBuffer);
-        if (audioData) {
-          audioState.sttSession.sendAudio(audioData);
+      // Only process audio if we have a validated call
+      if (validatedCallId) {
+        const audioState = this.activeCalls.get(validatedCallId);
+        if (audioState?.sttSession) {
+          const audioData = this.extractInboundAudio(msgBuffer);
+          if (audioData) {
+            audioState.sttSession.sendAudio(audioData);
+          }
         }
       }
     });
