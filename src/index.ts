@@ -38,10 +38,17 @@ function jsonResponse(res: ServerResponse, status: number, data: unknown): void 
   res.end(JSON.stringify(data));
 }
 
+const MAX_BODY_SIZE = 100 * 1024; // 100KB - reasonable limit for JSON API requests
+
 async function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > MAX_BODY_SIZE) {
+        req.destroy(new Error('Request body too large'));
+      }
+    });
     req.on('end', () => resolve(body));
     req.on('error', reject);
   });
@@ -78,15 +85,7 @@ server.on('request', async (req: IncomingMessage, res: ServerResponse) => {
 
   // API endpoints
   if (url.pathname.startsWith('/api/')) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
+    // Note: CORS headers removed - MCP client uses server-to-server fetch which doesn't need CORS
 
     if (!authenticate(req)) {
       jsonResponse(res, 401, { error: 'Unauthorized' });

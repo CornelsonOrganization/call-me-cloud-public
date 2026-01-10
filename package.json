@@ -9,7 +9,7 @@
     "dev": "bun --watch src/index.ts"
   },
   "dependencies": {
-    "openai": "^4.77.3",
+    "openai": "^6.16.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

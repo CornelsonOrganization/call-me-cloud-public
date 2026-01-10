@@ -11,6 +11,19 @@
 
 import type { PhoneProvider, PhoneConfig } from './types.js';
 
+/**
+ * Escape special XML characters to prevent XML injection in TwiML
+ * Order matters: & must be escaped first to avoid double-escaping
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 interface TwilioCallResponse {
   sid: string;
   status: string;
@@ -120,11 +133,12 @@ export class TwilioPhoneProvider implements PhoneProvider {
     const token = url.searchParams.get('token') || '';
     const baseUrl = `${url.protocol}//${url.host}${url.pathname}`;
 
+    // Escape values to prevent XML injection
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${baseUrl}">
-      <Parameter name="token" value="${token}" />
+    <Stream url="${escapeXml(baseUrl)}">
+      <Parameter name="token" value="${escapeXml(token)}" />
     </Stream>
   </Connect>
 </Response>`;

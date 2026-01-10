@@ -373,11 +373,17 @@ export class CallManager {
 
   private handlePhoneWebhook(req: IncomingMessage, res: ServerResponse): void {
     const contentType = req.headers['content-type'] || '';
+    const MAX_WEBHOOK_BODY_SIZE = 100 * 1024; // 100KB limit for webhook payloads
 
     // Telnyx sends JSON webhooks
     if (contentType.includes('application/json')) {
       let body = '';
-      req.on('data', (chunk) => { body += chunk; });
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_WEBHOOK_BODY_SIZE) {
+          req.destroy(new Error('Webhook body too large'));
+        }
+      });
       req.on('end', async () => {
         try {
           // Validate Telnyx signature (required for security)
@@ -413,7 +419,12 @@ export class CallManager {
     // Twilio sends form-urlencoded webhooks
     if (contentType.includes('application/x-www-form-urlencoded')) {
       let body = '';
-      req.on('data', (chunk) => { body += chunk; });
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > MAX_WEBHOOK_BODY_SIZE) {
+          req.destroy(new Error('Webhook body too large'));
+        }
+      });
       req.on('end', async () => {
         try {
           const params = new URLSearchParams(body);
