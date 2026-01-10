@@ -75,12 +75,115 @@ export class CallManager {
   private wss: WebSocketServer | null = null;
   private config: ServerConfig;
   private currentCallId = 0;
+  private externalServer: boolean = false;
 
-  constructor(config: ServerConfig) {
+  constructor(config: ServerConfig, existingServer?: ReturnType<typeof createServer>) {
     this.config = config;
+    if (existingServer) {
+      this.httpServer = existingServer;
+      this.externalServer = true;
+      this.setupWebSocket();
+    }
+  }
+
+  // Public method to handle webhooks from external server
+  handleWebhook(req: IncomingMessage, res: ServerResponse): void {
+    this.handlePhoneWebhook(req, res);
+  }
+
+  private setupWebSocket(): void {
+    if (!this.httpServer) return;
+
+    this.wss = new WebSocketServer({ noServer: true });
+
+    this.httpServer.on('upgrade', (request: IncomingMessage, socket: any, head: Buffer) => {
+      const url = new URL(request.url!, `http://${request.headers.host}`);
+      if (url.pathname === '/media-stream') {
+        const token = url.searchParams.get('token');
+        let callId = token ? this.wsTokenToCallId.get(token) : null;
+
+        if (token && callId) {
+          const state = this.activeCalls.get(callId);
+          if (!state || !validateWebSocketToken(state.wsToken, token)) {
+            console.error('[Security] Rejecting WebSocket: token validation failed');
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          console.error(`[Security] WebSocket token validated for call ${callId}`);
+        } else if (!callId) {
+          const activeCallIds = Array.from(this.activeCalls.keys());
+          if (activeCallIds.length > 0) {
+            callId = activeCallIds[activeCallIds.length - 1];
+            console.error(`[WebSocket] Token not found, using fallback call ID: ${callId}`);
+          } else {
+            callId = `pending-${Date.now()}`;
+            console.error(`[WebSocket] No active calls, using placeholder: ${callId}`);
+          }
+        }
+
+        console.error(`[WebSocket] Accepting connection for: ${callId}`);
+        this.wss!.handleUpgrade(request, socket, head, (ws) => {
+          this.wss!.emit('connection', ws, request, callId);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
+
+    this.wss.on('connection', (ws: WebSocket, _request: IncomingMessage, callId: string) => {
+      this.handleWebSocketConnection(ws, callId);
+    });
+  }
+
+  private handleWebSocketConnection(ws: WebSocket, callId: string): void {
+    console.error(`Media stream WebSocket connected for call ${callId}`);
+
+    const state = this.activeCalls.get(callId);
+    if (state) {
+      state.ws = ws;
+    }
+
+    ws.on('message', (message: Buffer | string) => {
+      const msgBuffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+
+      if (msgBuffer.length > 0 && msgBuffer[0] === 0x7b) {
+        try {
+          const msg = JSON.parse(msgBuffer.toString());
+          const msgState = this.activeCalls.get(callId);
+
+          if (msg.event === 'start' && msg.streamSid && msgState) {
+            msgState.streamSid = msg.streamSid;
+            console.error(`[${callId}] Captured streamSid: ${msg.streamSid}`);
+          }
+
+          if (msg.event === 'stop' && msgState) {
+            console.error(`[${callId}] Stream stopped`);
+            msgState.hungUp = true;
+          }
+        } catch { }
+      }
+
+      const audioState = this.activeCalls.get(callId);
+      if (audioState?.sttSession) {
+        const audioData = this.extractInboundAudio(msgBuffer);
+        if (audioData) {
+          audioState.sttSession.sendAudio(audioData);
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      console.error('Media stream WebSocket closed');
+    });
   }
 
   startServer(): void {
+    if (this.externalServer) {
+      console.error(`Using external HTTP server on port ${this.config.port}`);
+      return;
+    }
+
     this.httpServer = createServer((req, res) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
 

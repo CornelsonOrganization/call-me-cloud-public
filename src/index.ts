@@ -9,11 +9,16 @@
  * No ngrok needed - the cloud platform provides the public URL.
  */
 
-import { CallManager, loadServerConfig } from './phone-call.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 
-// Simple API key auth
+const port = parseInt(process.env.PORT || '3333', 10);
 const API_KEY = process.env.CALLME_API_KEY || 'change-me-in-production';
+
+// Start HTTP server immediately for health checks
+const server = createServer();
+let callManager: any = null;
+let publicUrl = '';
+let configError = '';
 
 function authenticate(req: IncomingMessage): boolean {
   const authHeader = req.headers.authorization;
@@ -35,13 +40,134 @@ async function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-async function main() {
-  const port = parseInt(process.env.PORT || '3333', 10);
+// Handle all HTTP requests
+server.on('request', async (req: IncomingMessage, res: ServerResponse) => {
+  const url = new URL(req.url!, `http://${req.headers.host}`);
 
-  // Railway provides the public URL via RAILWAY_PUBLIC_DOMAIN
-  // Render provides it via RENDER_EXTERNAL_URL
-  // Fall back to manual configuration
-  let publicUrl = process.env.CALLME_PUBLIC_URL;
+  // Health check - always available
+  if (url.pathname === '/health') {
+    if (configError) {
+      jsonResponse(res, 503, { status: 'error', error: configError });
+    } else if (!callManager) {
+      jsonResponse(res, 503, { status: 'starting' });
+    } else {
+      jsonResponse(res, 200, { status: 'ok', publicUrl });
+    }
+    return;
+  }
+
+  // If not configured yet, reject other requests
+  if (!callManager) {
+    jsonResponse(res, 503, { error: configError || 'Server starting...' });
+    return;
+  }
+
+  // Twilio webhook
+  if (url.pathname === '/twiml') {
+    // Forward to call manager's webhook handler
+    callManager.handleWebhook(req, res);
+    return;
+  }
+
+  // API endpoints
+  if (url.pathname.startsWith('/api/')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (!authenticate(req)) {
+      jsonResponse(res, 401, { error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      if (url.pathname === '/api/call' && req.method === 'POST') {
+        const body = JSON.parse(await readBody(req));
+        const { message } = body;
+        if (!message) {
+          jsonResponse(res, 400, { error: 'message is required' });
+          return;
+        }
+        const result = await callManager.initiateCall(message);
+        jsonResponse(res, 200, result);
+        return;
+      }
+
+      if (url.pathname.match(/^\/api\/call\/[^/]+\/continue$/) && req.method === 'POST') {
+        const callId = url.pathname.split('/')[3];
+        const body = JSON.parse(await readBody(req));
+        const { message } = body;
+        if (!message) {
+          jsonResponse(res, 400, { error: 'message is required' });
+          return;
+        }
+        const response = await callManager.continueCall(callId, message);
+        jsonResponse(res, 200, { response });
+        return;
+      }
+
+      if (url.pathname.match(/^\/api\/call\/[^/]+\/speak$/) && req.method === 'POST') {
+        const callId = url.pathname.split('/')[3];
+        const body = JSON.parse(await readBody(req));
+        const { message } = body;
+        if (!message) {
+          jsonResponse(res, 400, { error: 'message is required' });
+          return;
+        }
+        await callManager.speakOnly(callId, message);
+        jsonResponse(res, 200, { success: true });
+        return;
+      }
+
+      if (url.pathname.match(/^\/api\/call\/[^/]+\/end$/) && req.method === 'POST') {
+        const callId = url.pathname.split('/')[3];
+        const body = JSON.parse(await readBody(req));
+        const { message } = body;
+        if (!message) {
+          jsonResponse(res, 400, { error: 'message is required' });
+          return;
+        }
+        const result = await callManager.endCall(callId, message);
+        jsonResponse(res, 200, result);
+        return;
+      }
+
+      if (url.pathname === '/api/health' && req.method === 'GET') {
+        jsonResponse(res, 200, { status: 'ok', publicUrl });
+        return;
+      }
+
+      jsonResponse(res, 404, { error: 'Not found' });
+    } catch (error) {
+      console.error('API error:', error);
+      jsonResponse(res, 500, {
+        error: error instanceof Error ? error.message : 'Internal server error'
+      });
+    }
+    return;
+  }
+
+  res.writeHead(404);
+  res.end('Not Found');
+});
+
+// Start server immediately
+server.listen(port, () => {
+  console.error(`HTTP server listening on port ${port}`);
+});
+
+// Initialize call manager async
+async function initializeCallManager() {
+  const { CallManager, loadServerConfig } = await import('./phone-call.js');
+
+  // Get public URL
+  publicUrl = process.env.CALLME_PUBLIC_URL || '';
   if (!publicUrl) {
     const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
     const renderUrl = process.env.RENDER_EXTERNAL_URL;
@@ -50,169 +176,26 @@ async function main() {
     } else if (renderUrl) {
       publicUrl = renderUrl;
     } else {
-      console.error('Warning: No public URL configured. Set CALLME_PUBLIC_URL, RAILWAY_PUBLIC_DOMAIN, or RENDER_EXTERNAL_URL');
       publicUrl = `http://localhost:${port}`;
+      console.error('Warning: No public URL configured');
     }
   }
 
   console.error(`Public URL: ${publicUrl}`);
 
-  // Load config and create call manager
-  let serverConfig;
   try {
-    serverConfig = loadServerConfig(publicUrl);
+    const serverConfig = loadServerConfig(publicUrl);
+    callManager = new CallManager(serverConfig, server);
+    console.error('CallMe Cloud Server ready');
+    console.error(`Phone: ${serverConfig.phoneNumber} -> ${serverConfig.userPhoneNumber}`);
   } catch (error) {
-    console.error('Configuration error:', error instanceof Error ? error.message : error);
-    process.exit(1);
+    configError = error instanceof Error ? error.message : 'Configuration error';
+    console.error('Configuration error:', configError);
   }
-
-  const callManager = new CallManager(serverConfig);
-
-  // Get the internal HTTP server from call manager (handles webhooks)
-  callManager.startServer();
-  const internalServer = callManager.getHttpServer();
-
-  // Create API server on the same port by wrapping the internal server's handler
-  const originalHandler = internalServer?.listeners('request')[0] as any;
-
-  // Remove original handler and add our wrapper
-  if (originalHandler) {
-    internalServer?.removeListener('request', originalHandler);
-  }
-
-  internalServer?.on('request', async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url!, `http://${req.headers.host}`);
-
-    // API endpoints
-    if (url.pathname.startsWith('/api/')) {
-      // CORS headers
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-
-      // Auth check for API endpoints
-      if (!authenticate(req)) {
-        jsonResponse(res, 401, { error: 'Unauthorized' });
-        return;
-      }
-
-      try {
-        // POST /api/call - Initiate a call
-        if (url.pathname === '/api/call' && req.method === 'POST') {
-          const body = JSON.parse(await readBody(req));
-          const { message } = body;
-
-          if (!message) {
-            jsonResponse(res, 400, { error: 'message is required' });
-            return;
-          }
-
-          const result = await callManager.initiateCall(message);
-          jsonResponse(res, 200, result);
-          return;
-        }
-
-        // POST /api/call/:id/continue - Continue a call
-        if (url.pathname.match(/^\/api\/call\/[^/]+\/continue$/) && req.method === 'POST') {
-          const callId = url.pathname.split('/')[3];
-          const body = JSON.parse(await readBody(req));
-          const { message } = body;
-
-          if (!message) {
-            jsonResponse(res, 400, { error: 'message is required' });
-            return;
-          }
-
-          const response = await callManager.continueCall(callId, message);
-          jsonResponse(res, 200, { response });
-          return;
-        }
-
-        // POST /api/call/:id/speak - Speak without waiting for response
-        if (url.pathname.match(/^\/api\/call\/[^/]+\/speak$/) && req.method === 'POST') {
-          const callId = url.pathname.split('/')[3];
-          const body = JSON.parse(await readBody(req));
-          const { message } = body;
-
-          if (!message) {
-            jsonResponse(res, 400, { error: 'message is required' });
-            return;
-          }
-
-          await callManager.speakOnly(callId, message);
-          jsonResponse(res, 200, { success: true });
-          return;
-        }
-
-        // POST /api/call/:id/end - End a call
-        if (url.pathname.match(/^\/api\/call\/[^/]+\/end$/) && req.method === 'POST') {
-          const callId = url.pathname.split('/')[3];
-          const body = JSON.parse(await readBody(req));
-          const { message } = body;
-
-          if (!message) {
-            jsonResponse(res, 400, { error: 'message is required' });
-            return;
-          }
-
-          const result = await callManager.endCall(callId, message);
-          jsonResponse(res, 200, result);
-          return;
-        }
-
-        // GET /api/health - Health check
-        if (url.pathname === '/api/health' && req.method === 'GET') {
-          jsonResponse(res, 200, { status: 'ok', publicUrl });
-          return;
-        }
-
-        jsonResponse(res, 404, { error: 'Not found' });
-      } catch (error) {
-        console.error('API error:', error);
-        jsonResponse(res, 500, {
-          error: error instanceof Error ? error.message : 'Internal server error'
-        });
-      }
-      return;
-    }
-
-    // Pass through to original handler (webhooks, health, websocket)
-    if (originalHandler) {
-      originalHandler(req, res);
-    }
-  });
-
-  console.error('');
-  console.error('CallMe Cloud Server ready');
-  console.error(`Public URL: ${publicUrl}`);
-  console.error(`Phone: ${serverConfig.phoneNumber} -> ${serverConfig.userPhoneNumber}`);
-  console.error('');
-  console.error('API Endpoints:');
-  console.error('  POST /api/call          - Initiate a call');
-  console.error('  POST /api/call/:id/continue - Continue a call');
-  console.error('  POST /api/call/:id/speak    - Speak without response');
-  console.error('  POST /api/call/:id/end      - End a call');
-  console.error('  GET  /api/health        - Health check');
-  console.error('');
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    console.error('\nShutting down...');
-    callManager.shutdown();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
 }
 
-main().catch((error) => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
+initializeCallManager();
+
+// Graceful shutdown
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
