@@ -53,10 +53,6 @@ export function validateTwilioSignature(
 
   if (!valid) {
     console.error('[Security] Twilio signature mismatch');
-    console.error(`[Security] URL used: ${url}`);
-    console.error(`[Security] Params: ${JSON.stringify(Object.fromEntries(sortedParams))}`);
-    console.error(`[Security] Expected: ${expectedSignature}`);
-    console.error(`[Security] Received: ${signature}`);
   }
 
   return valid;
