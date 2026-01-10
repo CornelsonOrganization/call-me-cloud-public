@@ -1,139 +1,291 @@
 # Call-Me Cloud
 
-A cloud-hosted version of [call-me](https://github.com/ZeframLou/call-me) designed for VPN-restricted environments where ngrok tunneling doesn't work.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun)](https://bun.sh)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/call-me-cloud)
+
+**Voice conversations for AI agents.** Let Claude (or any AI) call you on the phone for real-time voice discussions.
+
+Built for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) - works with Claude Code, Claude Desktop, and any MCP-compatible client.
+
+## Features
+
+- **Real-time voice calls** - AI initiates phone calls and has natural conversations
+- **Barge-in support** - Interrupt the AI mid-sentence, just like a real conversation
+- **Cloud-native** - No ngrok or tunneling needed; deploys to Railway/Render
+- **Dual provider support** - Works with Twilio or Telnyx for phone services
+- **Streaming TTS** - Low-latency text-to-speech with multiple voice options
+- **Secure by default** - Webhook signature validation, token-based WebSocket auth
 
 ## Architecture
 
 ```
-┌─────────────────┐     HTTPS      ┌─────────────────┐     Webhooks     ┌─────────────┐
-│  Claude Code    │ ───────────▶  │  Railway Cloud  │ ◀──────────────  │   Twilio    │
-│  (MCP Client)   │                │  (call-me)      │ ───────────────▶ │             │
-│  Your Laptop    │                │                 │   Voice/Audio    │             │
-└─────────────────┘                └─────────────────┘                  └─────────────┘
-        │                                  │
-        │ VPN allows                       │ Public URL
-        │ outbound HTTPS                   │ (no tunnel needed)
-        ▼                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Your Computer                                   │
+│  ┌─────────────────┐                                                        │
+│  │  Claude Code    │                                                        │
+│  │  (MCP Client)   │────┐                                                   │
+│  └─────────────────┘    │                                                   │
+│           ▲             │ stdio                                             │
+│           │             ▼                                                   │
+│  ┌─────────────────┐                                                        │
+│  │  MCP Server     │ (local)                                                │
+│  │  mcp-client/    │                                                        │
+│  └────────┬────────┘                                                        │
+└───────────┼─────────────────────────────────────────────────────────────────┘
+            │ HTTPS (REST API)
+            ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Cloud (Railway / Render)                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                      call-me-cloud server                            │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    │   │
+│  │  │ REST API │  │ Webhook  │  │WebSocket │  │ Audio Processing │    │   │
+│  │  │ Handler  │  │ Handler  │  │ Server   │  │ (resample/encode)│    │   │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└───────────┬─────────────────────────────────┬───────────────────────────────┘
+            │                                 │
+            ▼                                 ▼
+     ┌─────────────┐                  ┌─────────────┐
+     │   Twilio    │                  │   OpenAI    │
+     │  or Telnyx  │                  │  TTS / STT  │
+     │             │                  │  Realtime   │
+     └──────┬──────┘                  └─────────────┘
+            │
+            ▼
+     ┌─────────────┐
+     │ Your Phone  │
+     │   📱        │
+     └─────────────┘
 ```
 
-## Setup
+## Quick Start
 
-### Step 1: Deploy to Railway
+### 1. Deploy to Railway
 
-1. Go to [railway.app](https://railway.app) and sign in
-2. Click "New Project" → "Deploy from GitHub repo"
-3. Connect this repository (or use "Deploy from local")
-4. Add environment variables:
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/riverscornelson/call-me-cloud)
 
-| Variable | Value |
-|----------|-------|
-| `CALLME_PHONE_ACCOUNT_SID` | Your Twilio Account SID |
-| `CALLME_PHONE_AUTH_TOKEN` | Your Twilio Auth Token |
-| `CALLME_PHONE_NUMBER` | Your Twilio phone number (+1...) |
-| `CALLME_USER_PHONE_NUMBER` | Your personal phone number (+1...) |
-| `CALLME_OPENAI_API_KEY` | Your OpenAI API key |
-| `CALLME_API_KEY` | A random secret for API auth (generate one) |
+Or manually:
+1. Fork this repo
+2. Connect to [Railway](https://railway.app)
+3. Add environment variables (see [Configuration](#configuration))
 
-5. Deploy and note your Railway URL (e.g., `https://call-me-cloud-production.up.railway.app`)
+### 2. Configure Phone Provider
 
-### Step 2: Configure Twilio Webhook
+**Twilio:**
+1. Get a phone number from [Twilio Console](https://console.twilio.com)
+2. Set webhook URL to `https://YOUR-RAILWAY-URL/twiml` (POST)
 
-1. Go to Twilio Console → Phone Numbers → Your Number
-2. Under "Voice & Fax", set:
-   - **A call comes in:** Webhook
-   - **URL:** `https://YOUR-RAILWAY-URL/twiml`
-   - **HTTP:** POST
+**Telnyx:**
+1. Get a phone number from [Telnyx Portal](https://portal.telnyx.com)
+2. Create a TeXML Application with webhook `https://YOUR-RAILWAY-URL/twiml`
 
-### Step 3: Install Local MCP Client
+### 3. Install MCP Client
 
 ```bash
 cd mcp-client
 bun install
 ```
 
-### Step 4: Add to Claude Code
+### 4. Add to Claude Code
 
 ```bash
-claude mcp add call-me -- bun run --cwd /path/to/call-me-cloud/mcp-client index.ts
+claude mcp add call-me -- bun run /path/to/call-me-cloud/mcp-client/index.ts
 ```
 
-Then add environment variables to your Claude settings (`.claude.json`):
+Set environment variables in your Claude config (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "call-me": {
-      "type": "stdio",
       "command": "bun",
-      "args": ["run", "--cwd", "/path/to/call-me-cloud/mcp-client", "index.ts"],
+      "args": ["run", "/path/to/call-me-cloud/mcp-client/index.ts"],
       "env": {
-        "CALLME_CLOUD_URL": "https://YOUR-RAILWAY-URL",
-        "CALLME_API_KEY": "your-api-key"
+        "CALLME_CLOUD_URL": "https://your-app.railway.app",
+        "CALLME_API_KEY": "your-secret-api-key"
       }
     }
   }
 }
 ```
 
-### Step 5: Test
+### 5. Test It
 
-Restart Claude Code and try:
 ```
-Call me
+You: Call me to discuss the project status
+Claude: [Initiates phone call]
 ```
 
-## Environment Variables
+## Configuration
 
-### Cloud Server (Railway)
+### Cloud Server Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CALLME_API_KEY` | Yes | - | Secret key for API authentication |
+| `CALLME_PHONE_PROVIDER` | No | `twilio` | Phone provider: `twilio` or `telnyx` |
+| `CALLME_PHONE_ACCOUNT_SID` | Yes | - | Twilio Account SID or Telnyx Connection ID |
+| `CALLME_PHONE_AUTH_TOKEN` | Yes | - | Twilio Auth Token or Telnyx API Key |
+| `CALLME_PHONE_NUMBER` | Yes | - | Your Twilio/Telnyx phone number |
+| `CALLME_USER_PHONE_NUMBER` | Yes | - | Your personal phone number to receive calls |
+| `CALLME_OPENAI_API_KEY` | Yes | - | OpenAI API key for TTS/STT |
+| `CALLME_TTS_VOICE` | No | `onyx` | TTS voice (see [Voices](#available-voices)) |
+| `CALLME_TELNYX_PUBLIC_KEY` | Telnyx | - | Telnyx webhook signing public key |
+| `OPENAI_API_BASE_URL` | No | - | Regional OpenAI endpoint (e.g., `us.api.openai.com`) |
+
+### MCP Client Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CALLME_PHONE_ACCOUNT_SID` | Yes | Twilio Account SID |
-| `CALLME_PHONE_AUTH_TOKEN` | Yes | Twilio Auth Token |
-| `CALLME_PHONE_NUMBER` | Yes | Twilio phone number to call from |
-| `CALLME_USER_PHONE_NUMBER` | Yes | Your phone number to receive calls |
-| `CALLME_OPENAI_API_KEY` | Yes | OpenAI API key for TTS/STT |
-| `CALLME_API_KEY` | Yes | Secret key for API authentication |
-| `PORT` | Auto | Set by Railway |
-
-### Local MCP Client
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `CALLME_CLOUD_URL` | Yes | Your Railway deployment URL |
+| `CALLME_CLOUD_URL` | Yes | Your Railway/Render deployment URL |
 | `CALLME_API_KEY` | Yes | Same API key as cloud server |
 
-## API Endpoints
+### Available Voices
 
-The cloud server exposes these REST endpoints:
+OpenAI TTS voices: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`
 
-- `POST /api/call` - Initiate a call
-- `POST /api/call/:id/continue` - Continue a call
-- `POST /api/call/:id/speak` - Speak without waiting
-- `POST /api/call/:id/end` - End a call
-- `GET /api/health` - Health check
+## API Reference
 
-All endpoints require `Authorization: Bearer YOUR_API_KEY` header.
+All endpoints require `Authorization: Bearer <API_KEY>` header.
+
+### Initiate Call
+```http
+POST /api/call
+Content-Type: application/json
+
+{"message": "Hey, I wanted to discuss the project status."}
+```
+
+**Response:**
+```json
+{
+  "callId": "call-1-1234567890",
+  "response": "User's spoken response",
+  "interrupted": false
+}
+```
+
+### Continue Conversation
+```http
+POST /api/call/:callId/continue
+Content-Type: application/json
+
+{"message": "What about the timeline?"}
+```
+
+### Speak Without Waiting
+```http
+POST /api/call/:callId/speak
+Content-Type: application/json
+
+{"message": "Let me explain..."}
+```
+
+### End Call
+```http
+POST /api/call/:callId/end
+Content-Type: application/json
+
+{"message": "Thanks, talk to you later!"}
+```
+
+**Response:**
+```json
+{"durationSeconds": 45}
+```
+
+### Health Check
+```http
+GET /health
+```
+
+## MCP Tools
+
+When used with Claude Code or other MCP clients:
+
+| Tool | Description |
+|------|-------------|
+| `initiate_call` | Start a new phone call with an initial message |
+| `continue_call` | Send a follow-up message and wait for response |
+| `speak_to_user` | Speak without waiting for a response |
+| `end_call` | End the call with a closing message |
 
 ## Costs
 
-| Service | Cost |
-|---------|------|
+| Service | Approximate Cost |
+|---------|------------------|
 | Railway | Free tier: $5/month credit |
-| Twilio (1 min) | ~$0.04 |
-| OpenAI TTS/STT (1 min) | ~$0.02 |
+| Twilio | ~$0.014/min outbound |
+| Telnyx | ~$0.007/min outbound |
+| OpenAI TTS | ~$15/1M characters |
+| OpenAI Realtime STT | ~$0.06/min |
+
+**Typical 1-minute call:** ~$0.05-0.08
+
+## Self-Hosting with Docker
+
+```bash
+docker build -t call-me-cloud .
+docker run -p 3333:3333 --env-file .env call-me-cloud
+```
+
+Or with docker-compose:
+
+```bash
+docker-compose up
+```
 
 ## Troubleshooting
 
-**"Could not reach cloud server"**
-- Check your Railway deployment is running
-- Verify CALLME_CLOUD_URL is correct (include https://)
-- Check CALLME_API_KEY matches on both ends
+### "Could not reach cloud server"
+- Verify `CALLME_CLOUD_URL` includes `https://`
+- Check Railway deployment is running
+- Ensure `CALLME_API_KEY` matches on both client and server
 
-**Call connects but no audio**
+### Call connects but no audio
 - Verify OpenAI API key has Realtime API access
-- Check Railway logs for errors
+- Check Railway logs for WebSocket connection errors
+- Ensure `CALLME_TTS_VOICE` is a valid voice name
 
-**Twilio webhook errors**
-- Ensure webhook URL is set to `https://YOUR-URL/twiml`
-- Check Railway logs for incoming webhook requests
+### Twilio webhook errors
+- Webhook URL must be `https://YOUR-URL/twiml` (not `/api/call`)
+- Check Twilio Console for webhook delivery logs
+- Verify `CALLME_PHONE_AUTH_TOKEN` is correct
+
+### Telnyx webhook errors
+- Ensure `CALLME_TELNYX_PUBLIC_KEY` is set (required for signature validation)
+- Check TeXML Application webhook configuration
+- Verify webhook URL in Telnyx Portal
+
+### Call cuts off early
+- Check Railway resource limits (memory/CPU)
+- Increase `CALLME_TRANSCRIPT_TIMEOUT_MS` for longer responses
+
+## Security
+
+- **API Authentication**: Bearer token required for all API endpoints
+- **Webhook Validation**: Twilio (HMAC-SHA1) and Telnyx (Ed25519) signatures verified
+- **WebSocket Auth**: Cryptographically secure tokens with timing-safe comparison
+- **No CORS**: Server-to-server only; browser access intentionally disabled
+
+See [CLAUDE.md](CLAUDE.md) for security implementation details.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+MIT License - see [LICENSE](LICENSE)
+
+## Acknowledgments
+
+- Built with [Bun](https://bun.sh) for fast TypeScript execution
+- Phone services by [Twilio](https://twilio.com) and [Telnyx](https://telnyx.com)
+- Speech services by [OpenAI](https://openai.com)
+- Designed for the [Model Context Protocol](https://modelcontextprotocol.io)
