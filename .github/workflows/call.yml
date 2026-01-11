@@ -1,0 +1,228 @@
+# Consolidated Call Workflow
+#
+# Triggers:
+#   - Manual: gh workflow run call.yml --repo OWNER/REPO -f prompt="..." -f delay_minutes=5
+#   - Scheduled: Daily at 9 AM UTC on weekdays
+#
+# Secrets required:
+#   - ANTHROPIC_API_KEY
+#   - CALLME_API_KEY
+#   - CALLME_CLOUD_URL
+
+name: Call
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'  # 9 AM UTC, Monday-Friday
+
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'What should Claude discuss/work on?'
+        required: false
+        default: ''
+        type: string
+      delay_minutes:
+        description: 'Minutes to wait before calling (0 = immediate, max 300)'
+        required: false
+        default: '0'
+        type: string
+      branch:
+        description: 'Branch name for commits (leave empty to auto-generate)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: call-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Verify cloud server is reachable
+        env:
+          CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
+        run: |
+          if [ -z "$CALLME_CLOUD_URL" ]; then
+            echo "::error::CALLME_CLOUD_URL secret is not set"
+            exit 1
+          fi
+
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 "${CALLME_CLOUD_URL}/health" 2>/dev/null || echo "failed")
+
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Cloud server not reachable at ${CALLME_CLOUD_URL}/health (got: $STATUS)"
+            echo "Check that your server is deployed and CALLME_CLOUD_URL is correct."
+            exit 1
+          fi
+          echo "✓ Cloud server healthy"
+
+      - name: Verify required secrets
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CALLME_API_KEY: ${{ secrets.CALLME_API_KEY }}
+        run: |
+          MISSING=""
+          if [ -z "$ANTHROPIC_API_KEY" ]; then MISSING="$MISSING ANTHROPIC_API_KEY"; fi
+          if [ -z "$CALLME_API_KEY" ]; then MISSING="$MISSING CALLME_API_KEY"; fi
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required secrets:$MISSING"
+            exit 1
+          fi
+          echo "✓ All required secrets are set"
+
+      - name: Wait for scheduled time
+        if: inputs.delay_minutes != '0' && inputs.delay_minutes != ''
+        env:
+          DELAY_INPUT: ${{ inputs.delay_minutes }}
+        run: |
+          # Sanitize: extract only digits, default to 0, cap at 300
+          DELAY=$(echo "$DELAY_INPUT" | tr -cd '0-9')
+          DELAY=${DELAY:-0}
+          if [ "$DELAY" -gt 300 ]; then
+            echo "::warning::Delay capped at 300 minutes (GitHub runner limit)"
+            DELAY=300
+          fi
+          if [ "$DELAY" -gt 0 ]; then
+            echo "⏰ Waiting $DELAY minutes before calling..."
+            sleep "${DELAY}m"
+          fi
+          echo "✓ Delay complete"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup branch
+        id: branch
+        env:
+          BRANCH_INPUT: ${{ inputs.branch }}
+        run: |
+          # Sanitize: allow only alphanumeric, dash, underscore, slash
+          SAFE_BRANCH=$(echo "$BRANCH_INPUT" | tr -cd 'a-zA-Z0-9/_-')
+          if [ -n "$SAFE_BRANCH" ]; then
+            BRANCH="$SAFE_BRANCH"
+          else
+            BRANCH="claude/call-$(date +%Y%m%d-%H%M%S)"
+          fi
+          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+
+          # Try to checkout existing branch, or create new one
+          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+            git checkout "$BRANCH"
+            echo "📁 Checked out existing branch: $BRANCH"
+          else
+            git checkout -b "$BRANCH"
+            echo "📁 Created new branch: $BRANCH"
+          fi
+
+      - name: Configure git
+        run: |
+          git config user.name "Claude (GitHub Actions)"
+          git config user.email "claude@github-actions.local"
+
+      - name: Gather context
+        id: context
+        run: |
+          echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          echo "default_branch=${{ github.event.repository.default_branch }}" >> $GITHUB_OUTPUT
+
+          # Recent commits for context
+          COMMITS=$(git log --oneline -5 2>/dev/null | head -c 500 || echo "No commits")
+          {
+            echo "commits<<EOF"
+            echo "$COMMITS"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Configure MCP for call-me-cloud
+        env:
+          CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
+          CALLME_API_KEY: ${{ secrets.CALLME_API_KEY }}
+        run: |
+          cat > /tmp/mcp-config.json << EOF
+          {
+            "mcpServers": {
+              "call-me-cloud": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "call-me-cloud-mcp@latest"],
+                "env": {
+                  "CALLME_CLOUD_URL": "${CALLME_CLOUD_URL}",
+                  "CALLME_API_KEY": "${CALLME_API_KEY}"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Build prompt
+        id: prompt
+        env:
+          USER_PROMPT: ${{ inputs.prompt }}
+          REPO_NAME: ${{ steps.context.outputs.repo }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          RECENT_COMMITS: ${{ steps.context.outputs.commits }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ] || [ -z "$USER_PROMPT" ]; then
+            # Scheduled or no prompt provided: daily standup mode
+            TOPIC="Daily standup - check in with the user about ${REPO_NAME}. Recent commits: ${RECENT_COMMITS}"
+          else
+            # Manual trigger with custom prompt
+            TOPIC="$USER_PROMPT"
+          fi
+
+          {
+            echo "content<<PROMPT_EOF"
+            cat << EOF
+          You are running in GitHub Actions for ${REPO_NAME}.
+
+          INSTRUCTIONS:
+          1. IMMEDIATELY call the user using initiate_call
+          2. Discuss the topic below with them
+          3. If they request changes, implement them
+          4. Commit changes to branch: ${BRANCH_NAME}
+          5. Before ending, summarize what you did and confirm they're satisfied
+
+          TOPIC: ${TOPIC}
+
+          Keep the conversation natural and concise - this is a phone call.
+          EOF
+            echo "PROMPT_EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Run Claude with call capability
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          claude_args: |
+            --mcp-config /tmp/mcp-config.json
+            --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Glob,Grep
+          max_turns: "50"
+
+      - name: Push changes
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          # Check if there are commits to push
+          COMMITS_TO_PUSH=$(git log origin/${{ github.event.repository.default_branch }}.."$BRANCH_NAME" --oneline 2>/dev/null | wc -l || echo "0")
+
+          if [ "$COMMITS_TO_PUSH" -gt 0 ]; then
+            echo "📤 Pushing $COMMITS_TO_PUSH commit(s) to $BRANCH_NAME..."
+            if git push -u origin "$BRANCH_NAME"; then
+              echo "✓ Pushed: https://github.com/${{ github.repository }}/tree/$BRANCH_NAME"
+            else
+              echo "::error::Failed to push to $BRANCH_NAME"
+              exit 1
+            fi
+          else
+            echo "ℹ️ No new commits to push"
+          fi

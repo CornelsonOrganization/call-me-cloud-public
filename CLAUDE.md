@@ -50,7 +50,7 @@ end_call: "Sounds good. Anything else before I hang up? ... Great, talk to you l
 If the user asks to "schedule a call" or "call me in X minutes", use the GitHub CLI to trigger a workflow:
 
 ```bash
-gh workflow run scheduled-call.yml \
+gh workflow run call.yml \
   --repo OWNER/REPO \
   -f delay_minutes=5 \
   -f prompt="Description of what to discuss/work on" \
@@ -63,7 +63,7 @@ This spawns a new Claude session that will call the user after the delay, discus
 
 User says: "Schedule a call in 5 minutes to refactor the auth module"
 ```bash
-gh workflow run scheduled-call.yml --repo user/repo \
+gh workflow run call.yml --repo user/repo \
   -f delay_minutes=5 \
   -f prompt="Refactor the auth module - discuss approach with user" \
   -f branch="feat/auth-refactor"

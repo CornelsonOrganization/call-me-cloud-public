@@ -32,7 +32,7 @@ Or via GitHub UI: Settings → Secrets and variables → Actions → New reposit
 
 ### 2. Add the Workflow
 
-Copy `.github/workflows/scheduled-call.yml` to your repo.
+Copy `.github/workflows/call.yml` to your repo.
 
 ### 3. Create a Personal Access Token (for triggering from Claude)
 
@@ -50,7 +50,7 @@ Tell Claude:
 
 Claude will use the GitHub API to trigger the workflow:
 ```bash
-gh workflow run scheduled-call.yml \
+gh workflow run call.yml \
   --repo your-username/your-repo \
   -f delay_minutes=5 \
   -f prompt="Discuss refactoring the auth module. User wants to split into OAuth and JWT files." \
@@ -80,3 +80,70 @@ gh workflow run scheduled-call.yml \
 **Code review:**
 > In 3 minutes, call me to review the changes in PR #42. I want to
 > walk through the security implications.
+
+## Pre-Flight Testing Checklist
+
+Before your first test, verify everything is configured correctly:
+
+### 1. Check GitHub Secrets Are Set
+
+```bash
+gh secret list --repo your-username/your-repo
+```
+
+You should see:
+- `ANTHROPIC_API_KEY`
+- `CALLME_API_KEY`
+- `CALLME_CLOUD_URL`
+
+### 2. Verify Cloud Server Is Deployed
+
+```bash
+curl -s https://your-server.railway.app/health
+```
+
+Should return: `{"status":"ok"}`
+
+### 3. Test Manual Trigger (No Delay)
+
+Start with the simplest test - immediate call, no code changes:
+
+```bash
+gh workflow run call.yml --repo your-username/your-repo \
+  -f prompt="Quick test - just say hello and confirm the call works, then hang up"
+```
+
+Monitor the run:
+```bash
+gh run watch --repo your-username/your-repo
+```
+
+### 4. Test With Delay
+
+Once the basic call works, test the delay feature:
+
+```bash
+gh workflow run call.yml --repo your-username/your-repo \
+  -f delay_minutes=1 \
+  -f prompt="Delayed test - confirm the 1 minute delay worked"
+```
+
+### 5. Test Code Changes
+
+Finally, test the full flow with commits:
+
+```bash
+gh workflow run call.yml --repo your-username/your-repo \
+  -f prompt="Add a comment to README.md, then call me to confirm" \
+  -f branch="test/actions-commit"
+```
+
+### Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Workflow fails immediately | Missing secrets | Check `gh secret list` |
+| "Cloud server not reachable" | Server not deployed or wrong URL | Verify `CALLME_CLOUD_URL` |
+| Call never comes | Phone number misconfigured on server | Check server env vars |
+| Call connects but no audio | OpenAI API key issue on server | Check `CALLME_OPENAI_API_KEY` |
+| Claude times out | Prompt too complex or MCP error | Check workflow logs |

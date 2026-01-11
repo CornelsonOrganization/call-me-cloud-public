@@ -2,6 +2,8 @@
 
 Call the user to report on build status, scheduled updates, or repo health—triggered directly from GitHub Actions.
 
+> **Note**: The examples below are illustrative. See [`.github/workflows/call.yml`](../.github/workflows/call.yml) for the actual implementation used in this repo.
+
 ## Architecture
 
 ```
