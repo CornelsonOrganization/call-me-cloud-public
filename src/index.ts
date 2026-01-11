@@ -212,7 +212,9 @@ async function initializeCallManager() {
     const serverConfig = loadServerConfig(publicUrl);
     callManager = new CallManager(serverConfig, server);
     console.error('CallMe Cloud Server ready');
-    console.error(`Phone: ${serverConfig.phoneNumber} -> ${serverConfig.userPhoneNumber}`);
+    // Redact phone numbers in logs for privacy
+    const redactPhone = (phone: string) => phone.slice(0, -8).replace(/./g, '*') + phone.slice(-4);
+    console.error(`Phone: ${redactPhone(serverConfig.phoneNumber)} -> ${redactPhone(serverConfig.userPhoneNumber)}`);
   } catch (error) {
     configError = error instanceof Error ? error.message : 'Configuration error';
     console.error('Configuration error:', configError);

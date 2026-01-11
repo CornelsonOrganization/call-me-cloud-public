@@ -14,7 +14,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "@types/ws": "^8.5.13",
-    "bun-types": "latest"
+    "@types/ws": "^8.5.13"
   }
 }
