@@ -3,12 +3,14 @@
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const indexPath = join(__dirname, '..', 'index.ts');
 
-// Resolve tsx loader from package's node_modules
-const tsxLoaderPath = join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'loader.mjs');
+// Use createRequire to properly resolve tsx from wherever npm installed it
+const require = createRequire(import.meta.url);
+const tsxLoaderPath = require.resolve('tsx/esm');
 
 // Spawn node with tsx loader using --import flag (Node 20.6+/18.19+ compatible)
 const child = spawn(

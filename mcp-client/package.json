@@ -1,6 +1,6 @@
 {
   "name": "call-me-cloud-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "MCP client for Call-Me Cloud - lets Claude call you via phone",
   "type": "module",
   "bin": {
