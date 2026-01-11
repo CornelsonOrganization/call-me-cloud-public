@@ -66,11 +66,12 @@ export function validateWhatsAppMessage(body: any): ValidationResult {
     ''
   );
 
-  // 5. Validate conversation SID format
-  if (!isValidConversationSid(body.ConversationSid)) {
+  // 5. Validate conversation/message SID format
+  // Accept both ConversationSid (CH...) and MessageSid (SM.../IM...) formats
+  if (!isValidConversationSid(body.ConversationSid) && !isValidMessageSid(body.ConversationSid)) {
     return {
       valid: false,
-      error: 'Invalid conversation SID format'
+      error: 'Invalid conversation/message SID format'
     };
   }
 
@@ -98,6 +99,19 @@ export function validateWhatsAppMessage(body: any): ValidationResult {
  */
 export function isValidConversationSid(sid: string): boolean {
   return /^CH[0-9a-f]{32}$/i.test(sid);
+}
+
+/**
+ * Validate Twilio Message SID format
+ *
+ * Format: SM or IM followed by 32 hexadecimal characters
+ * Examples: SM01234567890123456789012345678901
+ *           IM01234567890123456789012345678901
+ *
+ * SECURITY: Prevents injection via malformed SIDs
+ */
+export function isValidMessageSid(sid: string): boolean {
+  return /^(SM|IM|MM)[0-9a-f]{32}$/i.test(sid);
 }
 
 /**

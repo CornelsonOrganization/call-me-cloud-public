@@ -888,6 +888,25 @@ export class CallManager {
           bodyObj[key] = value;
         }
 
+        // Log incoming webhook fields for debugging
+        console.error('[WhatsApp Webhook] Received fields:', Object.keys(bodyObj).join(', '));
+
+        // ============================================================
+        // NORMALIZE WEBHOOK FORMAT
+        // Twilio Sandbox sends Messaging webhooks (From, To, Body, MessageSid)
+        // Twilio Conversations sends (ConversationSid, Author, Body)
+        // ============================================================
+
+        // Normalize: Map standard Messaging fields to Conversations-style fields
+        if (!bodyObj.Author && bodyObj.From) {
+          bodyObj.Author = bodyObj.From;
+        }
+        if (!bodyObj.ConversationSid && bodyObj.MessageSid) {
+          // For Messaging webhooks, use a lookup by phone number instead
+          // We'll handle this in session lookup
+          bodyObj.ConversationSid = bodyObj.MessageSid; // Temporary placeholder
+        }
+
         // ============================================================
         // STEP 1: Signature Validation (CRITICAL - FIRST LINE OF DEFENSE)
         // ============================================================
@@ -952,7 +971,21 @@ export class CallManager {
         // STEP 4: Session Lookup (CONSTANT TIME - PREVENT TIMING ATTACKS)
         // ============================================================
 
-        const session = this.sessionManager.getSessionByConversation(conversationSid);
+        // Try to find session by conversation SID first
+        let session = this.sessionManager.getSessionByConversation(conversationSid);
+
+        // If not found, try to find by phone number (for Messaging API webhooks)
+        if (!session && author) {
+          // Strip whatsapp: prefix to get raw phone number
+          const rawPhone = author.replace('whatsapp:', '');
+          const realConversationSid = this.sessionManager.getConversationForPhone(rawPhone);
+          if (realConversationSid) {
+            session = this.sessionManager.getSessionByConversation(realConversationSid);
+            console.error('[WhatsApp] Found session via phone lookup', {
+              foundConversationSid: realConversationSid
+            });
+          }
+        }
 
         // UNIFORM RESPONSE: Same response whether session found or not
         // This prevents session enumeration attacks
@@ -961,6 +994,7 @@ export class CallManager {
           // Session not found (expired, invalid, or never existed)
           console.error('[WhatsApp] Message for unknown conversation', {
             conversationSid,
+            authorHash: author ? hashForLogging(author) : 'none',
             // DO NOT log phone number
           });
 
