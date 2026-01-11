@@ -4,17 +4,33 @@ A cloud-hosted phone call MCP server that lets Claude call the user for voice co
 
 ## MCP Tools
 
+### Phone Call Tools
+
 - `initiate_call` - Start a new call with an initial message
 - `continue_call` - Send a follow-up message and wait for response
 - `speak_to_user` - Speak without waiting for a response
 - `end_call` - End the call with a closing message
 
-## When to Call
+### WhatsApp Messaging
+
+- `send_message` - Send a WhatsApp message and wait for user's reply (blocks until response received or 3-minute timeout)
+
+## When to Use Phone Calls vs WhatsApp
+
+### Use Phone Calls For:
 
 - Complex decisions that need real-time discussion
 - Clarifying ambiguous requirements
 - Reporting completion of significant work
 - When text would be too slow or cumbersome
+
+### Use WhatsApp Messaging For:
+
+- Fallback when phone calls fail (user unavailable, call not answered)
+- Simple confirmations or brief updates that don't need voice
+- When the user prefers text communication
+
+**Automatic Fallback:** If a phone call attempt fails, WhatsApp is the preferred fallback method. The system has a 3-minute timeout window for transcript responses.
 
 ## Call Before (Required Approval)
 
