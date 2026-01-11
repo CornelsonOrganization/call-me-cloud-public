@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 
-import { register } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const indexPath = join(__dirname, '..', 'index.ts');
 
-// Register tsx loader for TypeScript
-register('tsx/esm', pathToFileURL('./'));
+// Spawn node with tsx loader using --import flag (Node 20.6+/18.19+ compatible)
+const child = spawn(
+  process.execPath,
+  ['--import', 'tsx', indexPath],
+  {
+    stdio: 'inherit',
+    env: process.env,
+  }
+);
 
-// Import and run the main module
-await import(pathToFileURL(indexPath).href);
+child.on('exit', (code) => {
+  process.exit(code ?? 0);
+});
