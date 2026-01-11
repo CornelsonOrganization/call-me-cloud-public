@@ -3,22 +3,28 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import {
   loadProviderConfig,
   createProviders,
+  createMessagingProvider,
   validateProviderConfig,
   type ProviderRegistry,
   type ProviderConfig,
   type RealtimeSTTSession,
+  type MessagingProvider,
 } from './providers/index.js';
+import { MessagingErrorCode } from './providers/messaging-types.js';
 import {
   validateTwilioSignature,
   validateTelnyxSignature,
   generateWebSocketToken,
   validateWebSocketToken,
 } from './webhook-security.js';
+import { RateLimiter } from './rate-limiter.js';
+import { validateWhatsAppMessage, hashForLogging } from './webhook-validation.js';
+import { detectCallRequest } from './keyword-detection.js';
+import type { StatusCallbackEvent } from './providers/phone-twilio.js';
 
 interface CallState {
   callId: string;
   callControlId: string | null;
-  userPhoneNumber: string;
   ws: WebSocket | null;
   streamSid: string | null;  // Twilio media stream ID (required for sending audio)
   streamingReady: boolean;  // True when streaming.started event received (Telnyx)
@@ -30,6 +36,15 @@ interface CallState {
   // Barge-in (interruption) state
   isSpeaking: boolean;  // True while TTS audio is being sent
   interrupted: boolean;  // True if user interrupted during TTS playback
+  // WhatsApp fallback state
+  contactMode: 'voice' | 'whatsapp';
+  conversationSid?: string;         // Twilio Conversations SID
+  whatsappSessionExpiry?: number;   // 24-hour session window timestamp
+  pendingResponse: boolean;         // Waiting for user reply
+  // Activity tracking (event-driven timeouts, no polling)
+  lastActivityAt: number;           // Timestamp for inactivity timeout
+  inactivityTimer?: NodeJS.Timeout; // Event-driven timeout (cleared on activity)
+  whatsappSessionTimer?: NodeJS.Timeout; // 24-hour window timer
 }
 
 export interface ServerConfig {
@@ -40,6 +55,242 @@ export interface ServerConfig {
   providers: ProviderRegistry;
   providerConfig: ProviderConfig;  // For webhook signature verification
   transcriptTimeoutMs: number;
+  inactivityTimeoutMs: number;  // Session inactivity timeout (default 7 minutes)
+  messagingProvider: MessagingProvider | null;  // WhatsApp/messaging provider (optional, for fallback)
+}
+
+/**
+ * SessionManager handles secure mapping between conversation SIDs and phone numbers.
+ *
+ * SECURITY: Phone numbers are NEVER stored in session state or logged.
+ * They are stored separately in secure mappings that are:
+ * - Never persisted to disk
+ * - Never logged (only hashed versions are logged)
+ * - Cleared when sessions end
+ *
+ * @warning DO NOT log phone numbers from these mappings
+ * @warning DO NOT serialize these mappings to disk
+ */
+class SessionManager {
+  private sessions = new Map<string, CallState>();
+
+  // Secure mappings (never logged, never persisted to disk)
+  private conversationToPhone = new Map<string, string>();
+  private phoneToConversation = new Map<string, string>();
+
+  // Fast O(1) lookup by conversation SID (for webhook routing)
+  private conversationToCallId = new Map<string, string>();
+
+  constructor(private config: ServerConfig) {}
+
+  /**
+   * Register a phone number mapping for an existing call
+   * Used when transitioning from voice to WhatsApp
+   *
+   * @warning NEVER log the phoneNumber parameter
+   */
+  registerPhoneMapping(callId: string, phoneNumber: string, conversationSid: string): void {
+    const state = this.sessions.get(callId);
+    if (!state) {
+      throw new Error(`Cannot register phone mapping: call ${callId} not found`);
+    }
+
+    this.conversationToPhone.set(conversationSid, phoneNumber);
+    this.phoneToConversation.set(phoneNumber, conversationSid);
+    this.conversationToCallId.set(conversationSid, callId);  // For O(1) webhook routing
+
+    console.error(`[${callId}] Phone mapping registered for conversation ${conversationSid} (phone hash: ${this.hashPhone(phoneNumber)})`);
+  }
+
+  /**
+   * Get phone number for a conversation (used only when needed to initiate calls/messages)
+   *
+   * @warning NEVER log the returned value
+   */
+  getPhoneForConversation(conversationSid: string): string | undefined {
+    return this.conversationToPhone.get(conversationSid);
+  }
+
+  /**
+   * Get conversation SID for a phone number
+   */
+  getConversationForPhone(phoneNumber: string): string | undefined {
+    return this.phoneToConversation.get(phoneNumber);
+  }
+
+  /**
+   * Get session by call ID
+   */
+  getSession(callId: string): CallState | undefined {
+    return this.sessions.get(callId);
+  }
+
+  /**
+   * Get session by conversation SID (O(1) constant-time lookup)
+   * Uses Map for fast lookup to prevent timing attacks
+   */
+  getSessionByConversation(conversationSid: string): CallState | undefined {
+    const callId = this.conversationToCallId.get(conversationSid);
+    if (!callId) {
+      return undefined;
+    }
+    return this.sessions.get(callId);
+  }
+
+  /**
+   * Get all active sessions
+   */
+  getAllSessions(): Map<string, CallState> {
+    return this.sessions;
+  }
+
+  /**
+   * Add a session to management
+   */
+  addSession(callId: string, state: CallState): void {
+    this.sessions.set(callId, state);
+  }
+
+  /**
+   * Refresh inactivity timeout (call on every message received or sent)
+   *
+   * Uses event-driven timeout (no polling) for efficiency.
+   * Timer is cleared and reset on every activity.
+   */
+  refreshInactivityTimeout(state: CallState): void {
+    // Clear existing timer
+    if (state.inactivityTimer) {
+      clearTimeout(state.inactivityTimer);
+    }
+
+    // Set new timer
+    state.inactivityTimer = setTimeout(() => {
+      this.closeSession(state.callId, 'inactivity');
+    }, this.config.inactivityTimeoutMs);
+
+    // Update timestamp
+    state.lastActivityAt = Date.now();
+  }
+
+  /**
+   * Set WhatsApp 24-hour session window timer
+   * Called once when user first replies to template message
+   */
+  setWhatsAppSessionTimer(state: CallState): void {
+    if (!state.whatsappSessionExpiry) return;
+
+    // Clear existing timer if already set (prevents dangling timers)
+    if (state.whatsappSessionTimer) {
+      clearTimeout(state.whatsappSessionTimer);
+    }
+
+    const timeUntilExpiry = state.whatsappSessionExpiry - Date.now();
+    if (timeUntilExpiry <= 0) {
+      console.error(`[${state.callId}] WhatsApp session window already expired`);
+      return;
+    }
+
+    // Set timer for 1 hour before expiry (warning)
+    const WARNING_TIME_MS = 60 * 60 * 1000; // 1 hour
+    const warningTime = Math.max(0, timeUntilExpiry - WARNING_TIME_MS);
+
+    state.whatsappSessionTimer = setTimeout(() => {
+      this.handleSessionWindowExpiring(state);
+    }, warningTime);
+
+    console.error(`[${state.callId}] WhatsApp session window timer set, expires in ${Math.round(timeUntilExpiry / 1000 / 60)} minutes`);
+  }
+
+  /**
+   * Handle WhatsApp session window expiring soon (1 hour warning)
+   */
+  private handleSessionWindowExpiring(state: CallState): void {
+    console.error(`[${state.callId}] WhatsApp session window expiring soon (1 hour remaining)`, {
+      conversationSid: state.conversationSid,
+      expiresAt: state.whatsappSessionExpiry
+    });
+
+    // Set timer for actual expiry
+    if (state.whatsappSessionExpiry) {
+      const timeUntilExpiry = state.whatsappSessionExpiry - Date.now();
+      if (timeUntilExpiry > 0) {
+        state.whatsappSessionTimer = setTimeout(() => {
+          this.handleSessionWindowExpired(state);
+        }, timeUntilExpiry);
+      }
+    }
+  }
+
+  /**
+   * Handle WhatsApp session window fully expired
+   */
+  private handleSessionWindowExpired(state: CallState): void {
+    console.error(`[${state.callId}] WhatsApp session window expired`, {
+      conversationSid: state.conversationSid
+    });
+
+    // Mark as expired (next message requires template)
+    state.whatsappSessionExpiry = undefined;
+  }
+
+  /**
+   * Close session with reason
+   */
+  closeSession(callId: string, reason: string): void {
+    const state = this.sessions.get(callId);
+    if (!state) return;
+
+    console.error(`[${callId}] Closing session (reason: ${reason}, mode: ${state.contactMode})`);
+
+    // Clean up
+    this.removeSession(callId);
+  }
+
+  /**
+   * Remove session and clean up all associated resources
+   */
+  removeSession(callId: string): void {
+    const state = this.sessions.get(callId);
+    if (!state) return;
+
+    // Clear timers
+    if (state.inactivityTimer) {
+      clearTimeout(state.inactivityTimer);
+      state.inactivityTimer = undefined;
+    }
+    if (state.whatsappSessionTimer) {
+      clearTimeout(state.whatsappSessionTimer);
+      state.whatsappSessionTimer = undefined;
+    }
+
+    // Remove secure phone mappings
+    if (state.conversationSid) {
+      const phone = this.conversationToPhone.get(state.conversationSid);
+      if (phone) {
+        this.phoneToConversation.delete(phone);
+      }
+      this.conversationToPhone.delete(state.conversationSid);
+      this.conversationToCallId.delete(state.conversationSid);  // Clean up O(1) lookup map
+    }
+
+    // Remove session
+    this.sessions.delete(callId);
+
+    console.error(`[${callId}] Session removed and cleaned up`);
+  }
+
+  /**
+   * Hash phone number for logging (privacy)
+   * Uses same simple hash as TwilioConversationsProvider
+   *
+   * @warning Only use for logging, not for security
+   */
+  private hashPhone(phone: string): string {
+    const hash = phone.split('').reduce((acc, char) => {
+      return ((acc << 5) - acc) + char.charCodeAt(0);
+    }, 0);
+    return `***${Math.abs(hash).toString(16)}`;
+  }
 }
 
 export function loadServerConfig(publicUrl: string): ServerConfig {
@@ -56,8 +307,14 @@ export function loadServerConfig(publicUrl: string): ServerConfig {
 
   const providers = createProviders(providerConfig);
 
+  // Create messaging provider if WhatsApp is enabled
+  const messagingProvider = createMessagingProvider(providerConfig);
+
   // Default 3 minutes for transcript timeout
   const transcriptTimeoutMs = parseInt(process.env.CALLME_TRANSCRIPT_TIMEOUT_MS || '180000', 10);
+
+  // Default 7 minutes for inactivity timeout
+  const inactivityTimeoutMs = parseInt(process.env.CALLME_INACTIVITY_TIMEOUT_MS || '420000', 10);
 
   return {
     publicUrl,
@@ -67,11 +324,13 @@ export function loadServerConfig(publicUrl: string): ServerConfig {
     providers,
     providerConfig,
     transcriptTimeoutMs,
+    inactivityTimeoutMs,
+    messagingProvider,
   };
 }
 
 export class CallManager {
-  private activeCalls = new Map<string, CallState>();
+  private sessionManager: SessionManager;
   private callControlIdToCallId = new Map<string, string>();
   private wsTokenToCallId = new Map<string, string>();  // For WebSocket auth
   private httpServer: ReturnType<typeof createServer> | null = null;
@@ -79,14 +338,25 @@ export class CallManager {
   private config: ServerConfig;
   private currentCallId = 0;
   private externalServer: boolean = false;
+  private rateLimiter: RateLimiter;  // WhatsApp rate limiting
 
   constructor(config: ServerConfig, existingServer?: ReturnType<typeof createServer>) {
     this.config = config;
+    this.sessionManager = new SessionManager(config);
+    this.rateLimiter = new RateLimiter();  // Initialize rate limiter with defaults
     if (existingServer) {
       this.httpServer = existingServer;
       this.externalServer = true;
       this.setupWebSocket();
     }
+  }
+
+  /**
+   * Get activeCalls for backward compatibility
+   * @deprecated Use sessionManager directly
+   */
+  private get activeCalls(): Map<string, CallState> {
+    return this.sessionManager.getAllSessions();
   }
 
   // Public method to handle webhooks from external server
@@ -461,12 +731,16 @@ export class CallManager {
 
   private async handleTwilioWebhook(params: URLSearchParams, res: ServerResponse): Promise<void> {
     const callSid = params.get('CallSid');
-    const callStatus = params.get('CallStatus');
+    const callStatus = params.get('CallStatus') as StatusCallbackEvent | null;
 
     console.error(`Twilio webhook: CallSid=${callSid}, CallStatus=${callStatus}`);
 
+    // Define failure statuses that should trigger WhatsApp fallback
+    const failureStatuses: StatusCallbackEvent[] = ['no-answer', 'busy', 'canceled', 'failed'];
+    const isFailure = callStatus && failureStatuses.includes(callStatus);
+
     // Handle call status updates
-    if (callStatus === 'completed' || callStatus === 'busy' || callStatus === 'no-answer' || callStatus === 'failed') {
+    if (callStatus === 'completed' || isFailure) {
       // Call ended - find and mark as hung up
       if (callSid) {
         const callId = this.callControlIdToCallId.get(callSid);
@@ -476,6 +750,14 @@ export class CallManager {
           if (state) {
             state.hungUp = true;
             state.ws?.close();
+
+            // Trigger WhatsApp fallback if call failed (not if successfully completed)
+            if (isFailure && callStatus) {
+              // Don't await - let it run in background to avoid blocking webhook response
+              this.triggerWhatsAppFallback(callId, callStatus).catch((error) => {
+                console.error(`[${callId}] Error in WhatsApp fallback:`, error);
+              });
+            }
           }
         }
       }
@@ -571,6 +853,333 @@ export class CallManager {
     }
   }
 
+  /**
+   * Handle WhatsApp webhook from Twilio Conversations
+   *
+   * SECURITY ARCHITECTURE (Defense in Depth):
+   * 1. Signature validation (prevent forged webhooks)
+   * 2. Rate limiting (prevent DoS attacks)
+   * 3. Input validation (prevent injection attacks)
+   * 4. Uniform responses (prevent session enumeration)
+   * 5. Constant-time session lookup (prevent timing attacks)
+   *
+   * @param req HTTP request from Twilio
+   * @param res HTTP response to send back
+   */
+  async handleWhatsAppWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const startTime = Date.now();
+
+    // Read request body
+    let body = '';
+    const MAX_WEBHOOK_BODY_SIZE = 100 * 1024; // 100KB limit
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_WEBHOOK_BODY_SIZE) {
+        req.destroy(new Error('Webhook body too large'));
+      }
+    });
+
+    req.on('end', async () => {
+      try {
+        // Parse form-urlencoded body
+        const params = new URLSearchParams(body);
+        const bodyObj: Record<string, string> = {};
+        for (const [key, value] of params.entries()) {
+          bodyObj[key] = value;
+        }
+
+        // ============================================================
+        // STEP 1: Signature Validation (CRITICAL - FIRST LINE OF DEFENSE)
+        // ============================================================
+
+        const signature = req.headers['x-twilio-signature'] as string | undefined;
+        const webhookUrl = `${this.config.publicUrl}/whatsapp`;
+
+        const isValid = validateTwilioSignature(
+          this.config.providerConfig.phoneAuthToken,
+          signature,
+          webhookUrl,
+          params
+        );
+
+        if (!isValid) {
+          console.error('[Security] Invalid WhatsApp webhook signature');
+          // Return 401 with empty response (don't leak info)
+          res.writeHead(401);
+          res.end('');
+          return;
+        }
+
+        // ============================================================
+        // STEP 2: Rate Limiting (CRITICAL - PREVENT DOS)
+        // ============================================================
+
+        const conversationSid = bodyObj.ConversationSid || '';
+        const author = bodyObj.Author || ''; // Phone number (whatsapp:+1234567890)
+
+        if (this.rateLimiter.isRateLimited(author, conversationSid)) {
+          console.error('[Security] Rate limit exceeded', {
+            conversationSid,
+            authorHash: hashForLogging(author)
+          });
+
+          // Return 429 with empty response
+          res.writeHead(429);
+          res.end('');
+          return;
+        }
+
+        // ============================================================
+        // STEP 3: Input Validation (CRITICAL - PREVENT INJECTION)
+        // ============================================================
+
+        const validation = validateWhatsAppMessage(bodyObj);
+        if (!validation.valid) {
+          console.error('[Security] Invalid WhatsApp message payload', {
+            error: validation.error,
+            conversationSid
+          });
+
+          // Return 200 (don't retry invalid payloads)
+          res.writeHead(200);
+          res.end('');
+          return;
+        }
+
+        const messageBody = validation.sanitized!;
+
+        // ============================================================
+        // STEP 4: Session Lookup (CONSTANT TIME - PREVENT TIMING ATTACKS)
+        // ============================================================
+
+        const session = this.sessionManager.getSessionByConversation(conversationSid);
+
+        // UNIFORM RESPONSE: Same response whether session found or not
+        // This prevents session enumeration attacks
+
+        if (!session) {
+          // Session not found (expired, invalid, or never existed)
+          console.error('[WhatsApp] Message for unknown conversation', {
+            conversationSid,
+            // DO NOT log phone number
+          });
+
+          // Return 200 with empty body (SAME as success case)
+          res.writeHead(200);
+          res.end('');
+          return;
+        }
+
+        // ============================================================
+        // STEP 5: Process Message
+        // ============================================================
+
+        try {
+          // Refresh inactivity timeout
+          this.sessionManager.refreshInactivityTimeout(session);
+
+          // Check for keyword ("call me")
+          if (detectCallRequest(messageBody)) {
+            // User wants to switch to voice
+            console.error(`[${session.callId}] User requested voice call via WhatsApp`);
+            await this.initiateVoiceCallFromWhatsApp(session, messageBody);
+          } else {
+            // Route message to MCP client (placeholder - to be implemented in Phase 5)
+            console.error(`[${session.callId}] Received WhatsApp message: ${messageBody.substring(0, 50)}...`);
+            await this.routeMessageToMCP(session, messageBody);
+          }
+
+          // Return 200 with empty body (SAME as failure case)
+          res.writeHead(200);
+          res.end('');
+
+        } catch (error) {
+          console.error('[WhatsApp] Error processing message', {
+            error,
+            sessionId: session.callId,
+            conversationSid
+          });
+
+          // Still return 200 (don't let Twilio retry errors)
+          res.writeHead(200);
+          res.end('');
+        }
+
+        // Log timing (for monitoring)
+        const duration = Date.now() - startTime;
+        if (duration > 1000) {
+          console.error('[Performance] Slow WhatsApp webhook processing', {
+            duration,
+            conversationSid
+          });
+        }
+      } catch (error) {
+        console.error('[WhatsApp] Fatal webhook error:', error);
+        res.writeHead(500);
+        res.end('');
+      }
+    });
+
+    req.on('error', (error) => {
+      console.error('[WhatsApp] Request error:', error);
+      res.writeHead(400);
+      res.end('');
+    });
+  }
+
+  /**
+   * Initiate voice call when user requests it via WhatsApp
+   *
+   * This happens when user sends "call me" or similar keyword via WhatsApp.
+   * We attempt to upgrade the conversation from WhatsApp to voice.
+   *
+   * @param session Current session state (in WhatsApp mode)
+   * @param userMessage The message that triggered the call request
+   */
+  private async initiateVoiceCallFromWhatsApp(session: CallState, userMessage: string): Promise<void> {
+    console.error(`[${session.callId}] Initiating voice call from WhatsApp (keyword detected)`);
+
+    // Get phone number from secure mapping
+    const phoneNumber = this.sessionManager.getPhoneForConversation(session.conversationSid!);
+    if (!phoneNumber) {
+      console.error(`[${session.callId}] Cannot initiate call: phone number not found`);
+      // Send error message to user via WhatsApp
+      if (this.config.messagingProvider && session.conversationSid) {
+        await this.config.messagingProvider.sendMessage(
+          session.conversationSid,
+          "Sorry, I couldn't retrieve your phone number to call you. Please try again.",
+          false
+        );
+      }
+      return;
+    }
+
+    try {
+      // Attempt to initiate call
+      const callControlId = await this.config.providers.phone.initiateCall(
+        phoneNumber,
+        this.config.phoneNumber,
+        `${this.config.publicUrl}/twiml`
+      );
+
+      // Update session state to voice mode
+      session.contactMode = 'voice';
+      session.callControlId = callControlId;
+      this.callControlIdToCallId.set(callControlId, session.callId);
+
+      console.error(`[${session.callId}] Voice call initiated: ${callControlId}`);
+
+      // Send confirmation to user via WhatsApp (they'll get a call shortly)
+      if (this.config.messagingProvider && session.conversationSid) {
+        await this.config.messagingProvider.sendMessage(
+          session.conversationSid,
+          "Calling you now...",
+          false
+        );
+      }
+
+    } catch (error) {
+      console.error(`[${session.callId}] Failed to initiate voice call:`, error);
+
+      // Send error message to user via WhatsApp
+      if (this.config.messagingProvider && session.conversationSid) {
+        await this.config.messagingProvider.sendMessage(
+          session.conversationSid,
+          "Sorry, I couldn't place a call to you right now. Let's continue via WhatsApp.",
+          false
+        );
+      }
+    }
+  }
+
+  /**
+   * Route WhatsApp message to MCP client
+   *
+   * PLACEHOLDER: This will be fully implemented in Phase 5 (MCP Client Updates)
+   *
+   * For now, this just logs the message and sends a placeholder response.
+   * Phase 5 will add proper message routing to the MCP client.
+   *
+   * @param session Current session state
+   * @param message User's message from WhatsApp
+   */
+  private async routeMessageToMCP(session: CallState, message: string): Promise<void> {
+    // Add to conversation history
+    session.conversationHistory.push({ speaker: 'user', message });
+
+    // PLACEHOLDER: Phase 5 will add proper MCP routing
+    // For now, just send a simple acknowledgment
+    console.error(`[${session.callId}] Routing message to MCP client (Phase 5 implementation needed)`);
+
+    // Send placeholder response
+    if (this.config.messagingProvider && session.conversationSid) {
+      const response = "Message received via WhatsApp. (MCP integration coming in Phase 5)";
+      await this.config.messagingProvider.sendMessage(
+        session.conversationSid,
+        response,
+        false
+      );
+
+      // Add response to history
+      session.conversationHistory.push({ speaker: 'claude', message: response });
+    }
+  }
+
+  /**
+   * Trigger WhatsApp fallback when voice call fails
+   * This is called when call times out (no-answer, busy, canceled, failed)
+   *
+   * SECURITY: Never logs phone numbers, only hashed versions
+   */
+  private async triggerWhatsAppFallback(callId: string, reason: string): Promise<void> {
+    const state = this.activeCalls.get(callId);
+    if (!state) {
+      console.error(`[${callId}] Cannot trigger WhatsApp fallback: call not found`);
+      return;
+    }
+
+    // Check if messaging provider is available
+    if (!this.config.messagingProvider) {
+      console.error(`[${callId}] WhatsApp fallback not available: messaging provider not configured`);
+      return;
+    }
+
+    console.error(`[${callId}] Triggering WhatsApp fallback (reason: ${reason})`);
+
+    try {
+      // Create WhatsApp conversation
+      const userPhone = `whatsapp:${this.config.userPhoneNumber}`;
+      const conversationSid = await this.config.messagingProvider.createConversation(userPhone);
+
+      // Register phone mapping (secure, never logged)
+      this.sessionManager.registerPhoneMapping(callId, this.config.userPhoneNumber, conversationSid);
+
+      // Update session state
+      state.contactMode = 'whatsapp';
+      state.conversationSid = conversationSid;
+      state.whatsappSessionExpiry = Date.now() + (24 * 60 * 60 * 1000); // 24 hours from now
+
+      // Set WhatsApp session timer
+      this.sessionManager.setWhatsAppSessionTimer(state);
+
+      // Send template message to user
+      const templateMessage = `Hi! I tried calling you but couldn't reach you. Let's continue our conversation here via WhatsApp.`;
+      await this.config.messagingProvider.sendMessage(conversationSid, templateMessage, true);
+
+      console.error(`[${callId}] WhatsApp fallback successful, conversation ${conversationSid} created`);
+    } catch (error: any) {
+      console.error(`[${callId}] WhatsApp fallback failed:`, error);
+
+      // Handle specific errors
+      if (error.code === MessagingErrorCode.OPT_IN_REQUIRED) {
+        console.error(`[${callId}] User needs to join WhatsApp sandbox: ${error.message}`);
+      }
+
+      // Fail gracefully - don't throw, just log
+      // WhatsApp fallback is a bonus feature, not critical
+    }
+  }
+
   async initiateCall(message: string): Promise<{ callId: string; response: string; interrupted: boolean }> {
     const callId = `call-${++this.currentCallId}-${Date.now()}`;
 
@@ -585,7 +1194,6 @@ export class CallManager {
     const state: CallState = {
       callId,
       callControlId: null,
-      userPhoneNumber: this.config.userPhoneNumber,
       ws: null,
       streamSid: null,
       streamingReady: false,
@@ -596,6 +1204,15 @@ export class CallManager {
       sttSession,
       isSpeaking: false,
       interrupted: false,
+      // WhatsApp fallback state (initially in voice mode)
+      contactMode: 'voice',
+      conversationSid: undefined,
+      whatsappSessionExpiry: undefined,
+      pendingResponse: false,
+      // Activity tracking
+      lastActivityAt: Date.now(),
+      inactivityTimer: undefined,
+      whatsappSessionTimer: undefined,
     };
 
     // Set up barge-in detection: when speech is detected during TTS playback, interrupt
@@ -607,7 +1224,11 @@ export class CallManager {
       }
     });
 
-    this.activeCalls.set(callId, state);
+    this.sessionManager.addSession(callId, state);
+
+    // Register phone mapping for this call (secure, never logged)
+    // Note: conversationSid not set yet, will be set when falling back to WhatsApp
+    // For now, just track the phone number for potential fallback
 
     try {
       const callControlId = await this.config.providers.phone.initiateCall(
@@ -639,7 +1260,8 @@ export class CallManager {
       return { callId, response, interrupted: wasInterrupted };
     } catch (error) {
       state.sttSession?.close();
-      this.activeCalls.delete(callId);
+      // Clean up session and timers on error
+      this.sessionManager.removeSession(callId);
       throw error;
     }
   }
@@ -690,7 +1312,9 @@ export class CallManager {
     }
 
     const durationSeconds = Math.round((Date.now() - state.startTime) / 1000);
-    this.activeCalls.delete(callId);
+
+    // Clean up session and timers via SessionManager
+    this.sessionManager.removeSession(callId);
 
     return { durationSeconds };
   }
@@ -999,9 +1623,16 @@ export class CallManager {
   }
 
   shutdown(): void {
+    // End all active calls and clean up timers
     for (const callId of this.activeCalls.keys()) {
       this.endCall(callId, 'Goodbye!').catch(console.error);
     }
+
+    // Clean up any remaining sessions (in case endCall failed)
+    for (const callId of this.activeCalls.keys()) {
+      this.sessionManager.removeSession(callId);
+    }
+
     this.wss?.close();
     this.httpServer?.close();
   }

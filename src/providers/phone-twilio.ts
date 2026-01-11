@@ -29,6 +29,26 @@ interface TwilioCallResponse {
   status: string;
 }
 
+/**
+ * Twilio Status Callback Event
+ * Events sent to StatusCallback webhook URL
+ *
+ * Success statuses: 'initiated', 'ringing', 'answered', 'in-progress', 'completed'
+ * Failure statuses: 'no-answer', 'busy', 'canceled', 'failed'
+ */
+export type StatusCallbackEvent =
+  // Success flow
+  | 'initiated'
+  | 'ringing'
+  | 'answered'
+  | 'in-progress'
+  | 'completed'
+  // Failure statuses (call not completed successfully)
+  | 'no-answer'  // User didn't pick up
+  | 'busy'       // User's phone was busy
+  | 'canceled'   // Call was canceled before answered
+  | 'failed';    // Call failed due to error
+
 // Re-export for use in phone-call.ts
 export type { TwilioCallResponse };
 
@@ -63,7 +83,7 @@ export class TwilioPhoneProvider implements PhoneProvider {
           From: from,
           Url: webhookUrl,
           StatusCallback: webhookUrl,  // Receive call status updates (answered, completed, etc.)
-          StatusCallbackEvent: 'initiated ringing answered completed',
+          StatusCallbackEvent: 'initiated ringing answered completed no-answer busy canceled failed',
           MachineDetection: 'Enable',
           MachineDetectionTimeout: '5',
         }).toString(),
