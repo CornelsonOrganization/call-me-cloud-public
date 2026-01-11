@@ -167,6 +167,14 @@ jobs:
           }
           EOF
 
+          # Debug: verify config was created with actual values (masked)
+          echo "MCP config created. Checking structure..."
+          cat /tmp/mcp-config.json | jq 'del(.mcpServers[].env)' || cat /tmp/mcp-config.json
+
+          # Test that npx can find the package
+          echo "Testing MCP package availability..."
+          npx -y call-me-cloud-mcp@latest --version 2>&1 || echo "Note: --version may not be supported, but package should be cached now"
+
       - name: Build prompt
         id: prompt
         env:
