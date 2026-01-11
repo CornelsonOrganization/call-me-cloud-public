@@ -5,12 +5,8 @@
  * Uses direct REST API calls (no SDK dependency).
  */
 
-import {
-  MessagingProvider,
-  MessagingConfig,
-  MessagingError,
-  MessagingErrorCode,
-} from './messaging-types';
+import type { MessagingProvider, MessagingConfig } from './messaging-types'
+import { MessagingError, MessagingErrorCode } from './messaging-types'
 
 interface ConversationState {
   createdAt: number;
@@ -121,8 +117,8 @@ export class TwilioConversationsProvider implements MessagingProvider {
         return null;
       }
 
-      const data = await response.json();
-      const conversations = data.conversations || [];
+      const data = (await response.json()) as { conversations?: Array<{ conversation_sid: string; conversation_state: string }> }
+      const conversations = data.conversations || []
 
       // Find an active conversation (not closed/inactive)
       for (const conv of conversations) {
@@ -179,8 +175,8 @@ export class TwilioConversationsProvider implements MessagingProvider {
         throw new Error(`Twilio API error ${response.status}: ${errorText}`);
       }
 
-      const data = await response.json();
-      const messageSid = data.sid;
+      const data = (await response.json()) as { sid: string }
+      const messageSid = data.sid
 
       // Update conversation state
       const state = this.conversations.get(conversationSid);
@@ -300,8 +296,8 @@ export class TwilioConversationsProvider implements MessagingProvider {
       throw new Error(`Failed to create conversation: ${errorText}`);
     }
 
-    const data = await response.json();
-    return data.sid;
+    const data = (await response.json()) as { sid: string }
+    return data.sid
   }
 
   /**

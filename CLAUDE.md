@@ -98,17 +98,10 @@ Configure these in your Claude Code web environment settings:
 |----------|-------------|
 | `CALLME_API_KEY` | API key for authenticating requests to this server |
 | `CALLME_USER_PHONE_NUMBER` | Your phone number (where calls are placed) |
-| `CALLME_PHONE_ACCOUNT_SID` | Twilio Account SID or Telnyx Connection ID |
-| `CALLME_PHONE_AUTH_TOKEN` | Twilio Auth Token or Telnyx API Key |
+| `CALLME_PHONE_ACCOUNT_SID` | Twilio Account SID |
+| `CALLME_PHONE_AUTH_TOKEN` | Twilio Auth Token |
 | `CALLME_PHONE_NUMBER` | The phone number to call from |
 | `CALLME_OPENAI_API_KEY` | OpenAI API key for TTS and STT |
-
-### Provider-Specific
-
-| Variable | Description |
-|----------|-------------|
-| `CALLME_PHONE_PROVIDER` | `twilio` or `telnyx` (default: `telnyx`) |
-| `CALLME_TELNYX_PUBLIC_KEY` | Required for Telnyx webhook signature verification |
 
 ### Optional
 

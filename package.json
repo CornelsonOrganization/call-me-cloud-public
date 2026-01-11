@@ -1,12 +1,21 @@
 {
   "name": "call-me-cloud",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Cloud-hosted call-me server for VPN-restricted environments",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
     "start": "bun run src/index.ts",
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "test": "node --import tsx --test src/test/*.test.ts",
+    "test:watch": "node --import tsx --test --watch src/test/*.test.ts",
+    "test:mcp": "cd mcp-client && npm test",
+    "test:all": "npm test && npm run test:mcp",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "openai": "^6.16.0",
@@ -14,6 +23,12 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.5.13",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.3"
   }
 }

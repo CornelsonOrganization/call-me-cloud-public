@@ -1,5 +1,6 @@
-import WebSocket, { WebSocketServer } from 'ws';
-import { createServer, IncomingMessage, ServerResponse } from 'http';
+import WebSocket, { WebSocketServer } from 'ws'
+import { createServer, IncomingMessage, ServerResponse } from 'http'
+import type { Server } from 'http'
 import {
   loadProviderConfig,
   createProviders,
@@ -1076,7 +1077,7 @@ export class CallManager {
    * @param session Current session state (in WhatsApp mode)
    * @param userMessage The message that triggered the call request
    */
-  private async initiateVoiceCallFromWhatsApp(session: CallState, userMessage: string): Promise<void> {
+  private async initiateVoiceCallFromWhatsApp(session: CallState, _userMessage: string): Promise<void> {
     console.error(`[${session.callId}] Initiating voice call from WhatsApp (keyword detected)`);
 
     // Get phone number from secure mapping
@@ -1756,8 +1757,8 @@ export class CallManager {
     return (~(sign | (exponent << 4) | mantissa)) & 0xff;
   }
 
-  getHttpServer() {
-    return this.httpServer;
+  getHttpServer(): Server | null {
+    return this.httpServer
   }
 
   shutdown(): void {
