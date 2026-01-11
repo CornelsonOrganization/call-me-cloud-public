@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       delay_minutes:
-        description: 'Minutes to wait before calling (0 = immediate)'
+        description: 'Minutes to wait before calling (0 = immediate, max 300)'
         required: false
         default: '0'
         type: string
@@ -38,7 +38,7 @@ concurrency:
 jobs:
   call:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360  # GitHub-hosted runner max is 6 hours
 
     steps:
       - name: Wait for scheduled time
@@ -46,11 +46,14 @@ jobs:
         env:
           DELAY_INPUT: ${{ inputs.delay_minutes }}
         run: |
-          # Sanitize: extract only digits, default to 0, cap at 2880 (48 hours)
+          # Sanitize: extract only digits, default to 0
+          # Cap at 300 min (5 hours) to leave time for the call itself
+          # Note: GitHub-hosted runners max out at 6 hours total
           DELAY=$(echo "$DELAY_INPUT" | tr -cd '0-9')
           DELAY=${DELAY:-0}
-          if [ "$DELAY" -gt 2880 ]; then
-            DELAY=2880
+          if [ "$DELAY" -gt 300 ]; then
+            echo "⚠️ Delay capped at 300 minutes (GitHub-hosted runner limit)"
+            DELAY=300
           fi
           echo "⏰ Waiting $DELAY minutes before calling..."
           sleep "${DELAY}m"
@@ -103,25 +106,37 @@ jobs:
           }
           EOF
 
+      - name: Build prompt
+        id: prompt
+        env:
+          USER_TOPIC: ${{ inputs.prompt }}
+          REPO_NAME: ${{ github.repository }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          {
+            echo "content<<PROMPT_EOF"
+            cat << EOF
+          You are running in GitHub Actions for ${REPO_NAME}.
+
+          INSTRUCTIONS:
+          1. IMMEDIATELY call the user using initiate_call
+          2. Discuss the following topic with them
+          3. Implement what they request
+          4. Commit changes to branch: ${BRANCH_NAME}
+          5. Before ending, summarize what you did
+
+          TOPIC: ${USER_TOPIC}
+
+          This is a phone conversation while they're walking. Keep it conversational.
+          EOF
+            echo "PROMPT_EOF"
+          } >> $GITHUB_OUTPUT
+
       - name: Run Claude with call capability
         uses: anthropics/claude-code-action@v1
-        env:
-          PROMPT_INPUT: ${{ inputs.prompt }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            You are running in GitHub Actions for ${{ github.repository }}.
-
-            INSTRUCTIONS:
-            1. IMMEDIATELY call the user using initiate_call
-            2. Discuss the following topic with them
-            3. Implement what they request
-            4. Commit changes to branch: ${{ steps.branch.outputs.name }}
-            5. Before ending, summarize what you did
-
-            TOPIC: ${PROMPT_INPUT}
-
-            This is a phone conversation while they're walking. Keep it conversational.
+          prompt: ${{ steps.prompt.outputs.content }}
           claude_args: |
             --mcp-config /tmp/mcp-config.json
             --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Glob,Grep
