@@ -1105,23 +1105,31 @@ export class CallManager {
    */
   private async routeMessageToMCP(session: CallState, message: string): Promise<void> {
     // Add to conversation history
-    session.conversationHistory.push({ speaker: 'user', message });
+    if (session.conversationHistory) {
+      session.conversationHistory.push({ speaker: 'user', message });
+    }
 
-    // PLACEHOLDER: Phase 5 will add proper MCP routing
-    // For now, just send a simple acknowledgment
-    console.error(`[${session.callId}] Routing message to MCP client (Phase 5 implementation needed)`);
+    console.error(`[${session.callId}] Received WhatsApp message: "${message.substring(0, 100)}..."`);
 
-    // Send placeholder response
+    // Try to resolve any pending response first (for send_message tool)
+    if (session.conversationSid && this.resolveWhatsAppResponse(session.conversationSid, message)) {
+      console.error(`[${session.callId}] Resolved pending WhatsApp response`);
+      return;
+    }
+
+    // No pending response - this is an unsolicited message
+    // Send acknowledgment that we received it
     if (this.config.messagingProvider && session.conversationSid) {
-      const response = "Message received via WhatsApp. (MCP integration coming in Phase 5)";
+      const response = "Got it! I'll process your message.";
       await this.config.messagingProvider.sendMessage(
         session.conversationSid,
         response,
         false
       );
 
-      // Add response to history
-      session.conversationHistory.push({ speaker: 'claude', message: response });
+      if (session.conversationHistory) {
+        session.conversationHistory.push({ speaker: 'claude', message: response });
+      }
     }
   }
 
@@ -1178,6 +1186,94 @@ export class CallManager {
       // Fail gracefully - don't throw, just log
       // WhatsApp fallback is a bonus feature, not critical
     }
+  }
+
+  // Map to track pending WhatsApp message responses
+  private whatsappResponseResolvers: Map<string, (response: string) => void> = new Map();
+
+  /**
+   * Send a WhatsApp message directly and wait for response
+   */
+  async sendWhatsAppMessage(message: string): Promise<{ messageId: string; response: string }> {
+    // Check if messaging provider is available
+    if (!this.config.messagingProvider) {
+      throw new Error('WhatsApp not configured. Set CALLME_WHATSAPP_ENABLED=true and configure Twilio.');
+    }
+
+    const messageId = `msg-${++this.currentCallId}-${Date.now()}`;
+    console.error(`[${messageId}] Sending WhatsApp message`);
+
+    try {
+      // Create WhatsApp conversation
+      const userPhone = `whatsapp:${this.config.userPhoneNumber}`;
+      const conversationSid = await this.config.messagingProvider.createConversation(userPhone);
+
+      // Register phone mapping for response routing
+      this.sessionManager.registerPhoneMapping(messageId, this.config.userPhoneNumber, conversationSid);
+
+      // Create a minimal call state for session tracking
+      const state: CallState = {
+        callId: messageId,
+        contactMode: 'whatsapp',
+        conversationSid,
+        whatsappSessionExpiry: Date.now() + (24 * 60 * 60 * 1000),
+        pendingResponse: true,
+        // Minimal required fields
+        callControlId: '',
+        sttSession: null as any,
+        wsToken: '',
+        audioBuffer: Buffer.alloc(0),
+        lastAudioTime: Date.now(),
+        currentTranscript: '',
+        isProcessingAudio: false,
+        mediaStreamSid: null,
+        ttsQueue: [],
+        isSpeaking: false,
+      };
+
+      this.activeCalls.set(messageId, state);
+      this.sessionManager.setWhatsAppSessionTimer(state);
+
+      // Send the message
+      await this.config.messagingProvider.sendMessage(conversationSid, message, true);
+      console.error(`[${messageId}] WhatsApp message sent, waiting for response...`);
+
+      // Wait for response with timeout (3 minutes)
+      const response = await new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.whatsappResponseResolvers.delete(conversationSid);
+          reject(new Error('WhatsApp response timeout (3 minutes)'));
+        }, 180000);
+
+        this.whatsappResponseResolvers.set(conversationSid, (response: string) => {
+          clearTimeout(timeout);
+          this.whatsappResponseResolvers.delete(conversationSid);
+          resolve(response);
+        });
+      });
+
+      return { messageId, response };
+    } catch (error: any) {
+      console.error(`[${messageId}] WhatsApp message failed:`, error);
+
+      if (error.code === MessagingErrorCode.OPT_IN_REQUIRED) {
+        throw new Error(`User needs to join WhatsApp sandbox first. Send "join ${this.config.providerConfig.whatsappSandboxCode || 'your-code'}" to the Twilio sandbox number.`);
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Called by WhatsApp webhook when a response is received
+   */
+  resolveWhatsAppResponse(conversationSid: string, response: string): boolean {
+    const resolver = this.whatsappResponseResolvers.get(conversationSid);
+    if (resolver) {
+      resolver(response);
+      return true;
+    }
+    return false;
   }
 
   async initiateCall(message: string): Promise<{ callId: string; response: string; interrupted: boolean }> {

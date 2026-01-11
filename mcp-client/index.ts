@@ -116,6 +116,20 @@ async function main() {
             required: ['call_id', 'message'],
           },
         },
+        {
+          name: 'send_message',
+          description: 'Send a WhatsApp message to the user. Use when a phone call is not appropriate or when the user prefers text. Waits for user response.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              message: {
+                type: 'string',
+                description: 'The message to send via WhatsApp.',
+              },
+            },
+            required: ['message'],
+          },
+        },
       ],
     };
   });
@@ -208,6 +222,18 @@ async function main() {
 
         return {
           content: [{ type: 'text', text: `Call ended. Duration: ${result.durationSeconds}s` }],
+        };
+      }
+
+      if (request.params.name === 'send_message') {
+        const { message } = request.params.arguments as { message: string };
+        const result = await apiCall('/api/message', { message }) as { messageId: string; response: string };
+
+        return {
+          content: [{
+            type: 'text',
+            text: `WhatsApp message sent.\n\nMessage ID: ${result.messageId}\n\nUser's response:\n${result.response}`,
+          }],
         };
       }
 

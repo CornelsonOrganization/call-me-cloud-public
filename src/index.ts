@@ -151,6 +151,18 @@ server.on('request', async (req: IncomingMessage, res: ServerResponse) => {
         return;
       }
 
+      if (url.pathname === '/api/message' && req.method === 'POST') {
+        const body = JSON.parse(await readBody(req));
+        const { message } = body;
+        if (!message) {
+          jsonResponse(res, 400, { error: 'message is required' });
+          return;
+        }
+        const result = await callManager.sendWhatsAppMessage(message);
+        jsonResponse(res, 200, result);
+        return;
+      }
+
       if (url.pathname === '/api/health' && req.method === 'GET') {
         jsonResponse(res, 200, { status: 'ok', publicUrl });
         return;
