@@ -1208,9 +1208,6 @@ export class CallManager {
       const userPhone = `whatsapp:${this.config.userPhoneNumber}`;
       const conversationSid = await this.config.messagingProvider.createConversation(userPhone);
 
-      // Register phone mapping for response routing
-      this.sessionManager.registerPhoneMapping(messageId, this.config.userPhoneNumber, conversationSid);
-
       // Create a minimal call state for session tracking
       const state: CallState = {
         callId: messageId,
@@ -1232,6 +1229,9 @@ export class CallManager {
       };
 
       this.activeCalls.set(messageId, state);
+
+      // Register phone mapping for response routing (must be after session is added)
+      this.sessionManager.registerPhoneMapping(messageId, this.config.userPhoneNumber, conversationSid);
       this.sessionManager.setWhatsAppSessionTimer(state);
 
       // Send the message
