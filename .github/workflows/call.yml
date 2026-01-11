@@ -32,6 +32,11 @@ on:
         required: false
         default: ''
         type: string
+      additional_plugins:
+        description: 'Extra plugins to load (comma-separated, e.g., frontend-design,hookify)'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: call-${{ github.run_id }}
@@ -132,6 +137,28 @@ jobs:
           git config user.name "Claude (GitHub Actions)"
           git config user.email "claude@github-actions.local"
 
+      - name: Setup Claude Code plugins
+        id: plugins
+        env:
+          ADDITIONAL_PLUGINS: ${{ inputs.additional_plugins }}
+        run: |
+          # Run plugin setup script (outputs PLUGIN_NAMES, PLUGIN_MARKETPLACE, PLUGIN_COUNT)
+          if bash .github/scripts/setup-plugins.sh . "$ADDITIONAL_PLUGINS"; then
+            echo "✓ Plugin setup completed"
+          else
+            echo "::warning::Plugin setup failed, continuing without plugins"
+            echo "PLUGIN_COUNT=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Display configured plugins
+        if: steps.plugins.outputs.PLUGIN_COUNT != '0'
+        env:
+          PLUGIN_COUNT: ${{ steps.plugins.outputs.PLUGIN_COUNT }}
+        run: |
+          echo "Configured Plugins ($PLUGIN_COUNT)"
+          # Plugin names are in GITHUB_OUTPUT, just display the count
+          echo "✓ $PLUGIN_COUNT plugins ready for Claude Code"
+
       - name: Gather context
         id: context
         run: |
@@ -216,6 +243,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: ${{ steps.prompt.outputs.content }}
+          plugins: ${{ steps.plugins.outputs.PLUGIN_NAMES }}
+          plugin_marketplaces: ${{ steps.plugins.outputs.PLUGIN_MARKETPLACE }}
           claude_args: |
             --mcp-config /tmp/mcp-config.json
             --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,mcp__call-me-cloud__send_message,Read,Edit,Write,Glob,Grep,Bash,Task
