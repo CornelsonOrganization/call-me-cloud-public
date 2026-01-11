@@ -8,7 +8,8 @@
   },
   "files": [
     "bin",
-    "index.ts"
+    "index.ts",
+    "README.md"
   ],
   "scripts": {
     "start": "node --import tsx index.ts"
@@ -19,14 +20,26 @@
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "claude",
+    "anthropic",
+    "ai",
+    "llm",
     "phone",
     "call",
-    "voice"
+    "voice",
+    "telephony"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/riverscornelson/call-me-cloud"
+    "url": "git+https://github.com/riverscornelson/call-me-cloud.git"
+  },
+  "homepage": "https://github.com/riverscornelson/call-me-cloud#readme",
+  "bugs": {
+    "url": "https://github.com/riverscornelson/call-me-cloud/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "license": "MIT"
 }

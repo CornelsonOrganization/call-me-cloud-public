@@ -44,16 +44,14 @@ async function apiCall(path: string, body: unknown): Promise<unknown> {
 }
 
 async function main() {
-  // Verify cloud server is reachable
+  // Verify cloud server is reachable (uses unauthenticated /health endpoint)
   try {
-    const healthResponse = await fetch(`${CLOUD_URL}/api/health`, {
-      headers: { 'Authorization': `Bearer ${API_KEY}` },
-    });
+    const healthResponse = await fetch(`${CLOUD_URL}/health`);
     if (!healthResponse.ok) {
       throw new Error(`Health check failed: ${healthResponse.status}`);
     }
-    const health = await healthResponse.json() as { publicUrl: string };
-    console.error(`Connected to cloud server: ${health.publicUrl}`);
+    const health = await healthResponse.json() as { status: string; publicUrl?: string };
+    console.error(`Connected to cloud server: ${health.publicUrl || CLOUD_URL}`);
   } catch (error) {
     console.error('Warning: Could not reach cloud server:', error instanceof Error ? error.message : error);
     console.error('Calls may fail until the server is available.');

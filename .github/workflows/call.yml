@@ -209,16 +209,19 @@ jobs:
           max_turns: "50"
 
       - name: Push changes
+        id: push
         env:
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
         run: |
           # Check if there are commits to push
           COMMITS_TO_PUSH=$(git log origin/${{ github.event.repository.default_branch }}.."$BRANCH_NAME" --oneline 2>/dev/null | wc -l || echo "0")
+          echo "commits_pushed=$COMMITS_TO_PUSH" >> $GITHUB_OUTPUT
 
           if [ "$COMMITS_TO_PUSH" -gt 0 ]; then
             echo "📤 Pushing $COMMITS_TO_PUSH commit(s) to $BRANCH_NAME..."
             if git push -u origin "$BRANCH_NAME"; then
               echo "✓ Pushed: https://github.com/${{ github.repository }}/tree/$BRANCH_NAME"
+              echo "branch_url=https://github.com/${{ github.repository }}/tree/$BRANCH_NAME" >> $GITHUB_OUTPUT
             else
               echo "::error::Failed to push to $BRANCH_NAME"
               exit 1
@@ -226,3 +229,51 @@ jobs:
           else
             echo "ℹ️ No new commits to push"
           fi
+
+      # === Notifications ===
+      - name: Summary (success)
+        if: success()
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          COMMITS_PUSHED: ${{ steps.push.outputs.commits_pushed }}
+          BRANCH_URL: ${{ steps.push.outputs.branch_url }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          {
+            echo "## ✅ Call Completed Successfully"
+            echo ""
+            echo "| Detail | Value |"
+            echo "|--------|-------|"
+            echo "| **Branch** | \`$BRANCH_NAME\` |"
+            echo "| **Commits pushed** | $COMMITS_PUSHED |"
+            echo "| **Trigger** | ${{ github.event_name }} |"
+            if [ -n "$PROMPT" ]; then
+              echo "| **Topic** | $PROMPT |"
+            fi
+            echo ""
+            if [ -n "$BRANCH_URL" ]; then
+              echo "🔗 [View branch]($BRANCH_URL)"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
+          echo "::notice::Call completed successfully on branch $BRANCH_NAME"
+
+      - name: Summary (failure)
+        if: failure()
+        env:
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+        run: |
+          {
+            echo "## ❌ Call Failed"
+            echo ""
+            echo "| Detail | Value |"
+            echo "|--------|-------|"
+            echo "| **Branch** | \`${BRANCH_NAME:-not created}\` |"
+            echo "| **Trigger** | ${{ github.event_name }} |"
+            echo "| **Run** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "### Troubleshooting"
+            echo "- Check that \`CALLME_CLOUD_URL\` points to a running server"
+            echo "- Verify \`ANTHROPIC_API_KEY\` and \`CALLME_API_KEY\` are set"
+            echo "- Review the step logs above for specific errors"
+          } >> $GITHUB_STEP_SUMMARY
+          echo "::error::Call workflow failed - check logs for details"
