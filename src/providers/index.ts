@@ -6,12 +6,15 @@
  */
 
 import type { PhoneProvider, TTSProvider, RealtimeSTTProvider, ProviderRegistry } from './types.js';
+import type { MessagingProvider } from './messaging-types.js';
 import { TelnyxPhoneProvider } from './phone-telnyx.js';
 import { TwilioPhoneProvider } from './phone-twilio.js';
 import { OpenAITTSProvider } from './tts-openai.js';
 import { OpenAIRealtimeSTTProvider } from './stt-openai-realtime.js';
+import { TwilioConversationsProvider } from './messaging-twilio-conversations.js';
 
 export * from './types.js';
+export * from './messaging-types.js';
 
 export type PhoneProviderType = 'telnyx' | 'twilio';
 
@@ -35,6 +38,12 @@ export interface ProviderConfig {
   ttsVoice?: string;
   sttModel?: string;
   sttSilenceDurationMs?: number;
+
+  // WhatsApp messaging
+  whatsappEnabled?: boolean;
+  whatsappMode?: 'sandbox' | 'production';
+  whatsappPhoneNumber?: string;
+  whatsappSandboxCode?: string;
 }
 
 export function loadProviderConfig(): ProviderConfig {
@@ -55,6 +64,10 @@ export function loadProviderConfig(): ProviderConfig {
     ttsVoice: process.env.CALLME_TTS_VOICE || 'onyx',
     sttModel: process.env.CALLME_STT_MODEL || 'gpt-4o-transcribe',
     sttSilenceDurationMs,
+    whatsappEnabled: process.env.CALLME_WHATSAPP_ENABLED === 'true',
+    whatsappMode: (process.env.CALLME_WHATSAPP_MODE as 'sandbox' | 'production') || 'sandbox',
+    whatsappPhoneNumber: process.env.CALLME_WHATSAPP_PHONE_NUMBER,
+    whatsappSandboxCode: process.env.CALLME_WHATSAPP_SANDBOX_CODE,
   };
 }
 
@@ -92,6 +105,28 @@ export function createSTTProvider(config: ProviderConfig): RealtimeSTTProvider {
     model: config.sttModel,
     silenceDurationMs: config.sttSilenceDurationMs,
   });
+  return provider;
+}
+
+export function createMessagingProvider(config: ProviderConfig): MessagingProvider | null {
+  if (!config.whatsappEnabled) {
+    return null;
+  }
+
+  if (!config.whatsappPhoneNumber) {
+    console.warn('[Messaging] WhatsApp enabled but CALLME_WHATSAPP_PHONE_NUMBER not set');
+    return null;
+  }
+
+  const provider = new TwilioConversationsProvider();
+  provider.initialize({
+    accountSid: config.phoneAccountSid,
+    authToken: config.phoneAuthToken,
+    whatsappPhoneNumber: config.whatsappPhoneNumber,
+    whatsappMode: config.whatsappMode || 'sandbox',
+    whatsappSandboxCode: config.whatsappSandboxCode,
+  });
+
   return provider;
 }
 
