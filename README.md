@@ -145,7 +145,11 @@ This is the easiest way to get started. Your laptop can be closed, you can be on
    - `CALLME_API_KEY` - Your Call-Me Cloud API key (same as your Railway deployment)
    - `CALLME_CLOUD_URL` - Your Railway deployment URL (e.g., `https://your-app.railway.app`)
 
-3. **Trigger a call:**
+3. **Trigger a call** (two ways):
+
+   **Option A: From a Local Claude Session (Programmatic)**
+
+   If you're in a Claude Code session with repo access, use the GitHub CLI:
    ```bash
    # Immediate call
    gh workflow run call.yml -f prompt="Quick standup - what did I work on today?"
@@ -157,6 +161,17 @@ This is the easiest way to get started. Your laptop can be closed, you can be on
    gh workflow run call.yml -f prompt="Refactor auth module" -f branch="feat/auth-refactor"
    ```
 
+   **Option B: Manual Trigger via GitHub UI**
+
+   Navigate to your repository on GitHub (desktop or mobile):
+   1. Go to **Actions** tab
+   2. Select **Call** workflow from the left sidebar
+   3. Click **"Run workflow"** button
+   4. Fill in the prompt, delay, and branch fields
+   5. Click **"Run workflow"** to trigger
+
+   This is useful when you're away from your laptop or want to trigger a call without opening a Claude session.
+
 **How it works:**
 - Claude runs in GitHub Actions with full repo access
 - Calls you via your Railway deployment
@@ -165,7 +180,7 @@ This is the easiest way to get started. Your laptop can be closed, you can be on
 
 **Example use:**
 ```bash
-# Before going on a run
+# From a local Claude session before going on a run
 gh workflow run call.yml \
   -f delay_minutes=10 \
   -f prompt="I'm going for a 30-minute run. Call me to discuss the API design and any questions you have"

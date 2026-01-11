@@ -63,7 +63,11 @@ end_call: "Sounds good. Anything else before I hang up? ... Great, talk to you l
 
 ## Scheduling Calls via GitHub Actions
 
-If the user asks to "schedule a call" or "call me in X minutes", use the GitHub CLI to trigger a workflow:
+There are two ways to trigger GitHub Actions calls:
+
+### 1. From a Local Claude Session (Programmatic)
+
+If you're in a Claude Code session (terminal or desktop) with repo access, you can use the GitHub CLI to trigger a workflow programmatically:
 
 ```bash
 gh workflow run call.yml \
@@ -73,7 +77,7 @@ gh workflow run call.yml \
   -f branch="feat/branch-name"
 ```
 
-This spawns a new Claude session that will call the user after the delay, discuss the prompt, and commit changes to the specified branch.
+This is useful when the user says something like "Schedule a call in 5 minutes to refactor the auth module" during an active session.
 
 **Examples:**
 
@@ -87,6 +91,20 @@ gh workflow run call.yml --repo user/repo \
 
 User says: "Have Claude call me tomorrow morning about the API design"
 → Use a longer delay or suggest they set up a cron schedule
+
+### 2. Manual Trigger via GitHub UI (User-Initiated)
+
+Users can also manually trigger calls directly through:
+- **GitHub website**: Navigate to Actions → Call workflow → "Run workflow" button
+- **GitHub mobile app**: Access repository → Actions → Call → Manual trigger
+
+This approach is useful when:
+- The user is away from their laptop but wants to schedule a call
+- They want to trigger a call without opening a Claude session first
+- They prefer using GitHub's UI over command-line tools
+
+**What happens after trigger:**
+Both methods spawn a new Claude session in GitHub Actions that will call the user after the specified delay, discuss the prompt, and commit changes to the specified branch.
 
 ## Environment Variables (for Claude Code on the web)
 
