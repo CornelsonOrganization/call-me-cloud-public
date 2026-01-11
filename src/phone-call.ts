@@ -477,7 +477,9 @@ export class CallManager {
               msgState.hungUp = true;
             }
           }
-        } catch { }
+        } catch {
+          // Ignore malformed JSON messages from provider
+        }
       }
 
       // Only process audio if we have a validated call
@@ -593,7 +595,9 @@ export class CallManager {
               console.error(`[${callId}] Stream stopped`);
               msgState.hungUp = true;
             }
-          } catch { }
+          } catch {
+            // Ignore malformed JSON messages from provider
+          }
         }
 
         // Forward audio to realtime transcription session
@@ -636,7 +640,9 @@ export class CallManager {
           return Buffer.from(msg.media.payload, 'base64');
         }
       }
-    } catch { }
+    } catch {
+      // Ignore malformed JSON or non-audio messages
+    }
 
     return null;
   }
@@ -1249,17 +1255,19 @@ export class CallManager {
         conversationSid,
         whatsappSessionExpiry: Date.now() + (24 * 60 * 60 * 1000),
         pendingResponse: true,
-        // Minimal required fields
-        callControlId: '',
-        sttSession: null as any,
+        // Minimal required fields for WhatsApp mode
+        callControlId: null,
+        ws: null,
+        streamSid: null,
+        streamingReady: false,
         wsToken: '',
-        audioBuffer: Buffer.alloc(0),
-        lastAudioTime: Date.now(),
-        currentTranscript: '',
-        isProcessingAudio: false,
-        mediaStreamSid: null,
-        ttsQueue: [],
+        conversationHistory: [],
+        startTime: Date.now(),
+        hungUp: false,
+        sttSession: null,
         isSpeaking: false,
+        interrupted: false,
+        lastActivityAt: Date.now(),
       };
 
       this.activeCalls.set(messageId, state);
