@@ -18,8 +18,8 @@ This guide ensures the MCP client package meets quality standards before publish
 | TypeScript compilation | ✅ | Ships .ts with tsx runtime (tested) |
 | Local test | ✅ | Works via `npm pack` + `npx` |
 | Security audit | ✅ | `npm audit` shows 0 vulnerabilities |
-| Tests | ⚠️ | No automated test suite |
-| License file | ⚠️ | MIT in package.json, no LICENSE file |
+| Tests | ✅ | 4 tests pass (`npm test`) |
+| License file | ✅ | MIT LICENSE file included |
 
 ## Pre-Publishing Checklist
 

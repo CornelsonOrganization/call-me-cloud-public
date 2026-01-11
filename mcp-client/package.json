@@ -9,10 +9,12 @@
   "files": [
     "bin",
     "index.ts",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "start": "node --import tsx index.ts"
+    "start": "node --import tsx index.ts",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
@@ -41,5 +43,6 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "author": "Rivers Cornelson",
   "license": "MIT"
 }
