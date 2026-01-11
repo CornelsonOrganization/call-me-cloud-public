@@ -50,10 +50,10 @@ export class TwilioConversationsProvider implements MessagingProvider {
       const conversationSid = await this.createConversationResource();
 
       // Step 2: Add user as participant
+      // Note: The Twilio WhatsApp number is used as the proxy address for the user,
+      // NOT as a separate participant. The proxy address acts as the gateway that
+      // routes messages between the user's WhatsApp and the conversation.
       await this.addParticipant(conversationSid, whatsappPhone);
-
-      // Step 3: Add bot as participant
-      await this.addParticipant(conversationSid, this.config.whatsappPhoneNumber);
 
       // Track conversation state
       this.conversations.set(conversationSid, {
@@ -251,6 +251,10 @@ export class TwilioConversationsProvider implements MessagingProvider {
 
   /**
    * Add a participant to a conversation
+   *
+   * For WhatsApp participants, the proxy address (Twilio WhatsApp number) acts as the
+   * gateway that routes messages between the user's WhatsApp and the conversation.
+   * The Twilio number itself should NOT be added as a separate participant.
    */
   private async addParticipant(conversationSid: string, address: string): Promise<void> {
     const url = `https://conversations.twilio.com/v1/Conversations/${conversationSid}/Participants`;
@@ -259,7 +263,8 @@ export class TwilioConversationsProvider implements MessagingProvider {
       'MessagingBinding.Address': address,
     };
 
-    // If this is a WhatsApp number, set the proxy address
+    // For WhatsApp participants, set the proxy address to the Twilio WhatsApp number
+    // This routes messages through the Twilio number to reach the user
     if (address.startsWith('whatsapp:')) {
       params['MessagingBinding.ProxyAddress'] = this.config.whatsappPhoneNumber;
     }
