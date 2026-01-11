@@ -3,17 +3,21 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import {
   loadProviderConfig,
   createProviders,
+  createMessagingProvider,
   validateProviderConfig,
   type ProviderRegistry,
   type ProviderConfig,
   type RealtimeSTTSession,
+  type MessagingProvider,
 } from './providers/index.js';
+import { MessagingErrorCode } from './providers/messaging-types.js';
 import {
   validateTwilioSignature,
   validateTelnyxSignature,
   generateWebSocketToken,
   validateWebSocketToken,
 } from './webhook-security.js';
+import type { StatusCallbackEvent } from './providers/phone-twilio.js';
 
 interface CallState {
   callId: string;
@@ -49,6 +53,7 @@ export interface ServerConfig {
   providerConfig: ProviderConfig;  // For webhook signature verification
   transcriptTimeoutMs: number;
   inactivityTimeoutMs: number;  // Session inactivity timeout (default 7 minutes)
+  messagingProvider: MessagingProvider | null;  // WhatsApp/messaging provider (optional, for fallback)
 }
 
 /**
@@ -294,6 +299,9 @@ export function loadServerConfig(publicUrl: string): ServerConfig {
 
   const providers = createProviders(providerConfig);
 
+  // Create messaging provider if WhatsApp is enabled
+  const messagingProvider = createMessagingProvider(providerConfig);
+
   // Default 3 minutes for transcript timeout
   const transcriptTimeoutMs = parseInt(process.env.CALLME_TRANSCRIPT_TIMEOUT_MS || '180000', 10);
 
@@ -309,6 +317,7 @@ export function loadServerConfig(publicUrl: string): ServerConfig {
     providerConfig,
     transcriptTimeoutMs,
     inactivityTimeoutMs,
+    messagingProvider,
   };
 }
 
@@ -712,12 +721,16 @@ export class CallManager {
 
   private async handleTwilioWebhook(params: URLSearchParams, res: ServerResponse): Promise<void> {
     const callSid = params.get('CallSid');
-    const callStatus = params.get('CallStatus');
+    const callStatus = params.get('CallStatus') as StatusCallbackEvent | null;
 
     console.error(`Twilio webhook: CallSid=${callSid}, CallStatus=${callStatus}`);
 
+    // Define failure statuses that should trigger WhatsApp fallback
+    const failureStatuses: StatusCallbackEvent[] = ['no-answer', 'busy', 'canceled', 'failed'];
+    const isFailure = callStatus && failureStatuses.includes(callStatus);
+
     // Handle call status updates
-    if (callStatus === 'completed' || callStatus === 'busy' || callStatus === 'no-answer' || callStatus === 'failed') {
+    if (callStatus === 'completed' || isFailure) {
       // Call ended - find and mark as hung up
       if (callSid) {
         const callId = this.callControlIdToCallId.get(callSid);
@@ -727,6 +740,14 @@ export class CallManager {
           if (state) {
             state.hungUp = true;
             state.ws?.close();
+
+            // Trigger WhatsApp fallback if call failed (not if successfully completed)
+            if (isFailure && callStatus) {
+              // Don't await - let it run in background to avoid blocking webhook response
+              this.triggerWhatsAppFallback(callId, callStatus).catch((error) => {
+                console.error(`[${callId}] Error in WhatsApp fallback:`, error);
+              });
+            }
           }
         }
       }
@@ -819,6 +840,61 @@ export class CallManager {
       }
     } catch (error) {
       console.error(`Error handling webhook ${eventType}:`, error);
+    }
+  }
+
+  /**
+   * Trigger WhatsApp fallback when voice call fails
+   * This is called when call times out (no-answer, busy, canceled, failed)
+   *
+   * SECURITY: Never logs phone numbers, only hashed versions
+   */
+  private async triggerWhatsAppFallback(callId: string, reason: string): Promise<void> {
+    const state = this.activeCalls.get(callId);
+    if (!state) {
+      console.error(`[${callId}] Cannot trigger WhatsApp fallback: call not found`);
+      return;
+    }
+
+    // Check if messaging provider is available
+    if (!this.config.messagingProvider) {
+      console.error(`[${callId}] WhatsApp fallback not available: messaging provider not configured`);
+      return;
+    }
+
+    console.error(`[${callId}] Triggering WhatsApp fallback (reason: ${reason})`);
+
+    try {
+      // Create WhatsApp conversation
+      const userPhone = `whatsapp:${this.config.userPhoneNumber}`;
+      const conversationSid = await this.config.messagingProvider.createConversation(userPhone);
+
+      // Register phone mapping (secure, never logged)
+      this.sessionManager.registerPhoneMapping(callId, this.config.userPhoneNumber, conversationSid);
+
+      // Update session state
+      state.contactMode = 'whatsapp';
+      state.conversationSid = conversationSid;
+      state.whatsappSessionExpiry = Date.now() + (24 * 60 * 60 * 1000); // 24 hours from now
+
+      // Set WhatsApp session timer
+      this.sessionManager.setWhatsAppSessionTimer(state);
+
+      // Send template message to user
+      const templateMessage = `Hi! I tried calling you but couldn't reach you. Let's continue our conversation here via WhatsApp.`;
+      await this.config.messagingProvider.sendMessage(conversationSid, templateMessage, true);
+
+      console.error(`[${callId}] WhatsApp fallback successful, conversation ${conversationSid} created`);
+    } catch (error: any) {
+      console.error(`[${callId}] WhatsApp fallback failed:`, error);
+
+      // Handle specific errors
+      if (error.code === MessagingErrorCode.OPT_IN_REQUIRED) {
+        console.error(`[${callId}] User needs to join WhatsApp sandbox: ${error.message}`);
+      }
+
+      // Fail gracefully - don't throw, just log
+      // WhatsApp fallback is a bonus feature, not critical
     }
   }
 
