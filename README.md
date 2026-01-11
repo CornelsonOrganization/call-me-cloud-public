@@ -73,6 +73,8 @@ Or manually:
 
 ### 2. Configure Phone Provider
 
+> **Note:** Phone provider setup takes ~1 hour. You'll be switching between portals and copying credentials back and forth. It's not hard, just fiddly.
+
 **Twilio:**
 1. Get a phone number from [Twilio Console](https://console.twilio.com)
 2. Set webhook URL to `https://YOUR-RAILWAY-URL/twiml` (POST)
@@ -226,6 +228,8 @@ When used with Claude Code or other MCP clients:
 
 ## Self-Hosting with Docker
 
+> **Note:** Docker support is a work in progress. The basics should work, but this hasn't been thoroughly tested yet. Contributions welcome!
+
 ```bash
 docker build -t call-me-cloud .
 docker run -p 3333:3333 --env-file .env call-me-cloud
@@ -271,6 +275,23 @@ docker-compose up
 - **No CORS**: Server-to-server only; browser access intentionally disabled
 
 See [CLAUDE.md](CLAUDE.md) for security implementation details.
+
+## Limitations
+
+- **Outbound calls only** - Claude calls you; you cannot call Claude. This is intentional for security reasons: allowing inbound calls to wake up a terminal session with elevated permissions would be dangerous when you can't actively monitor it.
+- **Miss the call, miss the conversation** - If you don't answer, the conversation stops. There's no voicemail or retry. Use `claude --resume` when you're back at your laptop to continue.
+
+## Roadmap
+
+**SMS Fallback** (pending Twilio approval)
+
+The plan is to add SMS as a fallback when calls go unanswered:
+1. Call initiates
+2. If no answer after 25 seconds, send an SMS with the message
+3. You have 7 minutes to text back a response
+4. If no response, the conversation times out (resume later with `claude --resume`)
+
+This requires Twilio A2P 10DLC registration (proving you won't spam people), which is in progress.
 
 ## Contributing
 
