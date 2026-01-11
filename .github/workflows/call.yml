@@ -212,6 +212,11 @@ jobs:
             --mcp-config /tmp/mcp-config.json
             --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Glob,Grep
 
+      - name: Re-authenticate git
+        run: |
+          # Claude-code-action may override git credentials, re-configure for push
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
       - name: Push changes
         id: push
         env:
