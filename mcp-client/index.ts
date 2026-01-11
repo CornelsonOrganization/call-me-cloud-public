@@ -58,7 +58,7 @@ async function main() {
   }
 
   const mcpServer = new Server(
-    { name: 'callme-client', version: '1.0.0' },
+    { name: 'call-me-cloud', version: '1.0.1' },
     { capabilities: { tools: {} } }
   );
 
