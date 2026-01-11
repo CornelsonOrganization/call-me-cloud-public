@@ -37,7 +37,7 @@ export class TwilioConversationsProvider implements MessagingProvider {
   }
 
   /**
-   * Create a new conversation with a WhatsApp user
+   * Find an existing active conversation for a user, or create a new one
    */
   async createConversation(userPhone: string): Promise<string> {
     // Ensure phone number has WhatsApp prefix
@@ -46,6 +46,21 @@ export class TwilioConversationsProvider implements MessagingProvider {
       : `whatsapp:${userPhone}`;
 
     try {
+      // First, try to find an existing active conversation
+      const existingConversationSid = await this.findActiveConversation(whatsappPhone);
+      if (existingConversationSid) {
+        console.log(`[${this.name}] Reusing existing conversation ${existingConversationSid} for ${this.hashPhone(whatsappPhone)}`);
+
+        // Update tracking state
+        this.conversations.set(existingConversationSid, {
+          createdAt: Date.now(),
+          lastMessageAt: Date.now(),
+        });
+
+        return existingConversationSid;
+      }
+
+      // No existing conversation, create a new one
       // Step 1: Create conversation
       const conversationSid = await this.createConversationResource();
 
@@ -61,7 +76,7 @@ export class TwilioConversationsProvider implements MessagingProvider {
         lastMessageAt: Date.now(),
       });
 
-      console.log(`[${this.name}] Created conversation ${conversationSid} for ${this.hashPhone(whatsappPhone)}`);
+      console.log(`[${this.name}] Created new conversation ${conversationSid} for ${this.hashPhone(whatsappPhone)}`);
 
       return conversationSid;
     } catch (error: any) {
@@ -81,6 +96,46 @@ export class TwilioConversationsProvider implements MessagingProvider {
         `Failed to create conversation: ${error.message}`,
         { twilioError: error }
       );
+    }
+  }
+
+  /**
+   * Find an existing active conversation for a WhatsApp user
+   * Returns the conversation SID if found, null otherwise
+   */
+  private async findActiveConversation(whatsappPhone: string): Promise<string | null> {
+    try {
+      // Query Twilio for participant conversations
+      // We search by the user's address to find any conversations they're in
+      const url = `https://conversations.twilio.com/v1/ParticipantConversations?Address=${encodeURIComponent(whatsappPhone)}`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Basic ' + Buffer.from(`${this.config.accountSid}:${this.config.authToken}`).toString('base64'),
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`[${this.name}] Failed to query participant conversations: ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json();
+      const conversations = data.conversations || [];
+
+      // Find an active conversation (not closed/inactive)
+      for (const conv of conversations) {
+        if (conv.conversation_state === 'active') {
+          console.log(`[${this.name}] Found existing active conversation: ${conv.conversation_sid}`);
+          return conv.conversation_sid;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`[${this.name}] Error finding active conversation:`, error);
+      return null; // Fall back to creating new conversation
     }
   }
 
