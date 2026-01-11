@@ -16,6 +16,18 @@ A cloud-hosted phone call MCP server that lets Claude call the user for voice co
 - Reporting completion of significant work
 - When text would be too slow or cumbersome
 
+## Call Before (Required Approval)
+
+**Always call and get explicit approval before:**
+
+- `git push origin main` or `git push origin master`
+- `git push --force` (any branch)
+- `git reset --hard`
+- `rm -rf` or deleting multiple files
+- Any destructive or irreversible operation
+
+Example: "Hey, I'm ready to push to main. The changes include X, Y, Z. Should I go ahead?"
+
 ## Call Best Practices
 
 1. **Keep messages concise** - Phone audio is harder to follow than text
