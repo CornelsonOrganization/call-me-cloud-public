@@ -37,6 +37,11 @@ concurrency:
   group: call-${{ github.run_id }}
   cancel-in-progress: false
 
+# Required for OIDC token and pushing commits
+permissions:
+  id-token: write
+  contents: write
+
 jobs:
   call:
     runs-on: ubuntu-latest
@@ -206,7 +211,6 @@ jobs:
           claude_args: |
             --mcp-config /tmp/mcp-config.json
             --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Glob,Grep
-          max_turns: "50"
 
       - name: Push changes
         id: push
