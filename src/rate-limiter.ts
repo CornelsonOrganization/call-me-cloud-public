@@ -120,6 +120,8 @@ class TokenBucket {
 export class RateLimiter {
   private phoneBuckets = new Map<string, TokenBucket>();
   private conversationBuckets = new Map<string, TokenBucket>();
+  private phoneTimeouts = new Map<string, NodeJS.Timeout>();
+  private conversationTimeouts = new Map<string, NodeJS.Timeout>();
   private globalBucket: TokenBucket;
   private config: RateLimitConfig;
 
@@ -174,9 +176,11 @@ export class RateLimiter {
       this.phoneBuckets.set(phoneNumber, bucket);
 
       // Clean up after block duration to prevent memory leak
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         this.phoneBuckets.delete(phoneNumber);
+        this.phoneTimeouts.delete(phoneNumber);
       }, this.config.perPhone.blockDurationMs);
+      this.phoneTimeouts.set(phoneNumber, timeout);
     }
     return bucket;
   }
@@ -194,9 +198,11 @@ export class RateLimiter {
       this.conversationBuckets.set(conversationSid, bucket);
 
       // Cleanup after inactivity timeout (7 minutes default) to prevent memory leak
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         this.conversationBuckets.delete(conversationSid);
+        this.conversationTimeouts.delete(conversationSid);
       }, 7 * 60 * 1000); // 7 minutes - typical session inactivity timeout
+      this.conversationTimeouts.set(conversationSid, timeout);
     }
     return bucket;
   }
@@ -220,6 +226,18 @@ export class RateLimiter {
    * Clear all rate limit state (for testing)
    */
   reset(): void {
+    // Clear all phone timeouts to prevent memory leaks
+    for (const timeout of this.phoneTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.phoneTimeouts.clear();
+
+    // Clear all conversation timeouts to prevent memory leaks
+    for (const timeout of this.conversationTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.conversationTimeouts.clear();
+
     this.phoneBuckets.clear();
     this.conversationBuckets.clear();
     this.globalBucket = new TokenBucket(
