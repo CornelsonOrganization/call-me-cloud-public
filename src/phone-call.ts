@@ -1283,12 +1283,17 @@ export class CallManager {
 
       // Wait for response with timeout (3 minutes)
       const response = await new Promise<string>((resolve, reject) => {
+        let settled = false;
         const timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
           this.whatsappResponseResolvers.delete(conversationSid);
           reject(new Error('WhatsApp response timeout (3 minutes)'));
         }, 180000);
 
         this.whatsappResponseResolvers.set(conversationSid, (response: string) => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timeout);
           this.whatsappResponseResolvers.delete(conversationSid);
           resolve(response);
@@ -1298,6 +1303,9 @@ export class CallManager {
       return { messageId, response };
     } catch (error: any) {
       console.error(`[${messageId}] WhatsApp message failed:`, error);
+
+      // Clean up the session on failure
+      this.sessionManager.removeSession(messageId);
 
       if (error.code === MessagingErrorCode.OPT_IN_REQUIRED) {
         throw new Error(`User needs to join WhatsApp sandbox first. Send "join ${this.config.providerConfig.whatsappSandboxCode || 'your-code'}" to the Twilio sandbox number.`);
