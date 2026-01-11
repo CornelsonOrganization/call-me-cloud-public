@@ -125,22 +125,71 @@ async function main() {
     try {
       if (request.params.name === 'initiate_call') {
         const { message } = request.params.arguments as { message: string };
-        const result = await apiCall('/api/call', { message }) as { callId: string; response: string };
+        const result = await apiCall('/api/call', { message }) as {
+          callId: string;
+          response: string;
+          contactMode?: 'voice' | 'whatsapp';
+          whatsappSessionWindow?: {
+            expiresAt: number;
+            minutesRemaining: number;
+            status: 'active' | 'expiring_soon' | 'expired';
+          };
+        };
+
+        let responseText = `Call initiated successfully.\n\nCall ID: ${result.callId}`;
+
+        // Add contact mode information if present
+        if (result.contactMode) {
+          responseText += `\nContact mode: ${result.contactMode}`;
+
+          // Add WhatsApp session window info if in WhatsApp mode
+          if (result.contactMode === 'whatsapp' && result.whatsappSessionWindow) {
+            const { minutesRemaining, status } = result.whatsappSessionWindow;
+            responseText += `\nWhatsApp session: ${Math.round(minutesRemaining)} minutes remaining`;
+
+            if (status === 'expiring_soon') {
+              responseText += ` (expires soon - switch to template messages after expiry)`;
+            }
+          }
+        }
+
+        responseText += `\n\nUser's response:\n${result.response}\n\nUse continue_call to ask follow-ups or end_call to hang up.`;
 
         return {
           content: [{
             type: 'text',
-            text: `Call initiated successfully.\n\nCall ID: ${result.callId}\n\nUser's response:\n${result.response}\n\nUse continue_call to ask follow-ups or end_call to hang up.`,
+            text: responseText,
           }],
         };
       }
 
       if (request.params.name === 'continue_call') {
         const { call_id, message } = request.params.arguments as { call_id: string; message: string };
-        const result = await apiCall(`/api/call/${call_id}/continue`, { message }) as { response: string };
+        const result = await apiCall(`/api/call/${call_id}/continue`, { message }) as {
+          response: string;
+          contactMode?: 'voice' | 'whatsapp';
+          whatsappSessionWindow?: {
+            expiresAt: number;
+            minutesRemaining: number;
+            status: 'active' | 'expiring_soon' | 'expired';
+          };
+        };
+
+        let responseText = `User's response:\n${result.response}`;
+
+        // Add WhatsApp session window warning if expiring soon
+        if (result.contactMode === 'whatsapp' && result.whatsappSessionWindow) {
+          const { minutesRemaining, status } = result.whatsappSessionWindow;
+
+          if (status === 'expiring_soon') {
+            responseText += `\n\n⚠️ WhatsApp session expiring in ${Math.round(minutesRemaining)} minutes. Consider wrapping up or asking user to reply to extend window.`;
+          } else if (status === 'expired') {
+            responseText += `\n\n⚠️ WhatsApp session expired. Future messages require approved templates.`;
+          }
+        }
 
         return {
-          content: [{ type: 'text', text: `User's response:\n${result.response}` }],
+          content: [{ type: 'text', text: responseText }],
         };
       }
 
