@@ -68,19 +68,19 @@ end_call({ call_id: "call-1", message: "Sounds good, I'll get started. Talk soon
 
 - Node.js 18+
 - A deployed [Call-Me Cloud](https://github.com/riverscornelson/call-me-cloud) server
-- Twilio or Telnyx account for phone calls
+- Twilio account for phone calls
 - OpenAI API key (for speech-to-text and text-to-speech)
 
 ## How It Works
 
 ```
 Claude Code  -->  This MCP Client  -->  Your Cloud Server  -->  Phone Call
-   (stdio)          (REST API)           (Twilio/Telnyx)        (to you)
+   (stdio)          (REST API)              (Twilio)           (to you)
 ```
 
 1. Claude decides to call you using one of the MCP tools
 2. This client forwards the request to your cloud server
-3. The server initiates a phone call via Twilio/Telnyx
+3. The server initiates a phone call via Twilio
 4. Audio is processed through OpenAI's real-time API
 5. Your response is transcribed and returned to Claude
 

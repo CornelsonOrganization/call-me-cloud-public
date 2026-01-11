@@ -1,6 +1,6 @@
 {
   "name": "call-me-cloud",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Cloud-hosted call-me server for VPN-restricted environments",
   "type": "module",
   "main": "src/index.ts",
