@@ -1,16 +1,32 @@
 {
-  "name": "call-me-mcp-client",
+  "name": "call-me-cloud-mcp",
   "version": "1.0.0",
-  "description": "Local MCP client that connects to call-me cloud server",
+  "description": "MCP client for Call-Me Cloud - lets Claude call you via phone",
   "type": "module",
-  "main": "index.ts",
+  "bin": {
+    "call-me-cloud-mcp": "./bin/run.js"
+  },
+  "files": [
+    "bin",
+    "index.ts"
+  ],
   "scripts": {
-    "start": "bun run index.ts"
+    "start": "node --import tsx index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4"
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "tsx": "^4.19.0"
   },
-  "devDependencies": {
-    "bun-types": "latest"
-  }
+  "keywords": [
+    "mcp",
+    "claude",
+    "phone",
+    "call",
+    "voice"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/riverscornelson/call-me-cloud"
+  },
+  "license": "MIT"
 }

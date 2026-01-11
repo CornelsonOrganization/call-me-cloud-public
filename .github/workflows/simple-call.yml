@@ -1,0 +1,66 @@
+# Simple: Direct HTTP call without Claude Code
+#
+# This is a lightweight alternative that calls your Railway server directly.
+# No AI interpretation - just a scripted phone message.
+#
+# Secrets needed:
+#   - CALLME_API_KEY: Your Call-Me Cloud API key
+#   - CALLME_CLOUD_URL: Your Railway deployment URL
+
+name: Simple Call Alert
+
+on:
+  workflow_run:
+    workflows: ["CI", "Deploy"]
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Message to speak on the call'
+        required: true
+
+concurrency:
+  group: simple-call
+  cancel-in-progress: false
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'failure'
+
+    steps:
+      - name: Build message
+        id: msg
+        run: |
+          if [ -n "${{ inputs.message }}" ]; then
+            MSG="${{ inputs.message }}"
+          else
+            MSG="Hey, the ${{ github.event.workflow_run.name }} workflow just failed on ${{ github.repository }}. You might want to take a look. Let me know if you have questions."
+          fi
+          echo "message=$MSG" >> $GITHUB_OUTPUT
+
+      - name: Initiate call
+        id: call
+        run: |
+          RESPONSE=$(curl -sf -X POST "${{ secrets.CALLME_CLOUD_URL }}/api/call" \
+            -H "Authorization: Bearer ${{ secrets.CALLME_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg msg "${{ steps.msg.outputs.message }}" '{message: $msg}')")
+
+          CALL_ID=$(echo "$RESPONSE" | jq -r '.callId')
+          echo "call_id=$CALL_ID" >> $GITHUB_OUTPUT
+          echo "Call initiated: $CALL_ID"
+
+      - name: Wait for user response
+        run: sleep 45  # Give user time to respond
+
+      - name: End call
+        if: always()
+        run: |
+          curl -sf -X POST "${{ secrets.CALLME_CLOUD_URL }}/api/call/${{ steps.call.outputs.call_id }}/end" \
+            -H "Authorization: Bearer ${{ secrets.CALLME_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Alright, I will let you go. Talk to you later!"}' || true

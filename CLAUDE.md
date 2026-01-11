@@ -45,6 +45,33 @@ continue_call: "Got it. Any other questions about the implementation?"
 end_call: "Sounds good. Anything else before I hang up? ... Great, talk to you later!"
 ```
 
+## Scheduling Calls via GitHub Actions
+
+If the user asks to "schedule a call" or "call me in X minutes", use the GitHub CLI to trigger a workflow:
+
+```bash
+gh workflow run scheduled-call.yml \
+  --repo OWNER/REPO \
+  -f delay_minutes=5 \
+  -f prompt="Description of what to discuss/work on" \
+  -f branch="feat/branch-name"
+```
+
+This spawns a new Claude session that will call the user after the delay, discuss the prompt, and commit changes to the specified branch.
+
+**Examples:**
+
+User says: "Schedule a call in 5 minutes to refactor the auth module"
+```bash
+gh workflow run scheduled-call.yml --repo user/repo \
+  -f delay_minutes=5 \
+  -f prompt="Refactor the auth module - discuss approach with user" \
+  -f branch="feat/auth-refactor"
+```
+
+User says: "Have Claude call me tomorrow morning about the API design"
+→ Use a longer delay or suggest they set up a cron schedule
+
 ## Environment Variables (for Claude Code on the web)
 
 Configure these in your Claude Code web environment settings:

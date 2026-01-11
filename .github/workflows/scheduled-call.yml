@@ -1,0 +1,117 @@
+# Scheduled Call with Dynamic Prompt
+#
+# Trigger from any Claude session:
+#   gh workflow run scheduled-call.yml --repo OWNER/REPO \
+#     -f delay_minutes=5 \
+#     -f prompt="Discuss the auth refactor" \
+#     -f branch="feat/auth-refactor"
+#
+# Secrets needed:
+#   - ANTHROPIC_API_KEY
+#   - CALLME_API_KEY
+#   - CALLME_CLOUD_URL
+
+name: Scheduled Call
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'What should Claude discuss/work on?'
+        required: true
+        type: string
+      delay_minutes:
+        description: 'Minutes to wait before calling (0 = immediate)'
+        required: false
+        default: '0'
+        type: string
+      branch:
+        description: 'Branch name for commits (leave empty to auto-generate)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: scheduled-call-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Wait for scheduled time
+        if: inputs.delay_minutes != '0'
+        run: |
+          DELAY=${{ inputs.delay_minutes }}
+          echo "⏰ Waiting $DELAY minutes before calling..."
+          sleep "${DELAY}m"
+          echo "✓ Delay complete, initiating call"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup branch
+        id: branch
+        run: |
+          if [ -n "${{ inputs.branch }}" ]; then
+            BRANCH="${{ inputs.branch }}"
+          else
+            BRANCH="claude/call-$(date +%Y%m%d-%H%M%S)"
+          fi
+          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+          git checkout -b "$BRANCH"
+          echo "📁 Created branch: $BRANCH"
+
+      - name: Configure git
+        run: |
+          git config user.name "Claude (GitHub Actions)"
+          git config user.email "claude@github-actions.local"
+
+      - name: Configure MCP for call-me-cloud
+        run: |
+          cat > .mcp.json << EOF
+          {
+            "mcpServers": {
+              "call-me-cloud": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "call-me-cloud-mcp@latest"],
+                "env": {
+                  "CALLME_CLOUD_URL": "${{ secrets.CALLME_CLOUD_URL }}",
+                  "CALLME_API_KEY": "${{ secrets.CALLME_API_KEY }}"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Run Claude with call capability
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are running in GitHub Actions for ${{ github.repository }}.
+
+            INSTRUCTIONS:
+            1. IMMEDIATELY call the user using initiate_call
+            2. Discuss: ${{ inputs.prompt }}
+            3. Implement what they request
+            4. Commit changes to branch: ${{ steps.branch.outputs.name }}
+            5. Before ending, summarize what you did
+
+            This is a phone conversation while they're walking. Keep it conversational.
+          allowed_tools: "mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Bash,Glob,Grep"
+          max_turns: "50"
+
+      - name: Push changes
+        run: |
+          if git log origin/${{ github.ref_name }}..${{ steps.branch.outputs.name }} --oneline 2>/dev/null | grep -q .; then
+            git push -u origin ${{ steps.branch.outputs.name }}
+            echo "🚀 Pushed: https://github.com/${{ github.repository }}/tree/${{ steps.branch.outputs.name }}"
+          else
+            echo "ℹ️ No commits to push"
+          fi
