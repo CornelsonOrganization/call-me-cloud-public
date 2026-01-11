@@ -48,46 +48,45 @@ jobs:
 
       - name: Gather context
         id: ctx
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          WORKFLOW_STATUS: ${{ github.event.workflow_run.conclusion }}
         run: |
           # Basic repo info
           echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
           echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "latest_commit=$(git log -1 --pretty='%s')" >> $GITHUB_OUTPUT
 
-          # Recent commits (escaped for JSON)
+          # Recent commits
           COMMITS=$(git log --oneline -5 | head -c 500)
           echo "commits<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-          # Trigger info
-          echo "event=${{ github.event_name }}" >> $GITHUB_OUTPUT
-
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            echo "workflow_name=${{ github.event.workflow_run.name }}" >> $GITHUB_OUTPUT
-            echo "workflow_status=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
+          # Trigger info (use env vars to avoid injection)
+          echo "event=${EVENT_NAME}" >> $GITHUB_OUTPUT
+          if [ "${EVENT_NAME}" = "workflow_run" ]; then
+            echo "workflow_name=${WORKFLOW_NAME}" >> $GITHUB_OUTPUT
+            echo "workflow_status=${WORKFLOW_STATUS}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Configure MCP
+      - name: Configure MCP for call-me-cloud
+        env:
+          CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
+          CALLME_API_KEY: ${{ secrets.CALLME_API_KEY }}
         run: |
-          mkdir -p ~/.claude
-          cat > ~/.claude/settings.json << EOF
+          cat > /tmp/mcp-config.json << EOF
           {
             "mcpServers": {
               "call-me-cloud": {
+                "type": "stdio",
                 "command": "npx",
                 "args": ["-y", "call-me-cloud-mcp@latest"],
                 "env": {
-                  "CALLME_CLOUD_URL": "${{ secrets.CALLME_CLOUD_URL }}",
-                  "CALLME_API_KEY": "${{ secrets.CALLME_API_KEY }}"
+                  "CALLME_CLOUD_URL": "${CALLME_CLOUD_URL}",
+                  "CALLME_API_KEY": "${CALLME_API_KEY}"
                 }
               }
             }
@@ -96,33 +95,35 @@ jobs:
 
       - name: Build prompt
         id: prompt
+        env:
+          CUSTOM_PROMPT: ${{ inputs.prompt }}
+          EVENT_TYPE: ${{ steps.ctx.outputs.event }}
+          WORKFLOW_NAME: ${{ steps.ctx.outputs.workflow_name }}
+          REPO_NAME: ${{ steps.ctx.outputs.repo }}
+          BRANCH_NAME: ${{ steps.ctx.outputs.branch }}
+          LATEST_COMMIT: ${{ steps.ctx.outputs.latest_commit }}
+          RECENT_COMMITS: ${{ steps.ctx.outputs.commits }}
         run: |
-          if [ -n "${{ inputs.prompt }}" ]; then
-            # Manual trigger with custom prompt
-            PROMPT="${{ inputs.prompt }}"
-          elif [ "${{ steps.ctx.outputs.event }}" = "workflow_run" ]; then
-            # Workflow completion (likely failure since we filter above)
-            PROMPT="URGENT: Call the user immediately. The ${{ steps.ctx.outputs.workflow_name }} workflow just FAILED on ${{ steps.ctx.outputs.repo }}.
-
-          Latest commit: $(git log -1 --pretty='%s')
-          Branch: ${{ steps.ctx.outputs.branch }}
-
-          Keep it brief but get their attention. Ask if they want details or help debugging."
+          if [ -n "$CUSTOM_PROMPT" ]; then
+            PROMPT="$CUSTOM_PROMPT"
+          elif [ "$EVENT_TYPE" = "workflow_run" ]; then
+            PROMPT="URGENT: Call the user immediately. The ${WORKFLOW_NAME} workflow just FAILED on ${REPO_NAME}. Latest commit: ${LATEST_COMMIT}. Branch: ${BRANCH_NAME}. Keep it brief but get their attention. Ask if they want details or help debugging."
           else
-            # Scheduled daily update
-            PROMPT="Call the user with a quick daily status update for ${{ steps.ctx.outputs.repo }}.
-
-          Recent activity:
-          ${{ steps.ctx.outputs.commits }}
-
-          Keep it conversational. Ask if they want to discuss any recent changes or priorities."
+            PROMPT="Call the user with a quick daily status update for ${REPO_NAME}. Recent activity: ${RECENT_COMMITS}. Keep it conversational. Ask if they want to discuss any recent changes or priorities."
           fi
-
-          # Write to file to handle multiline
-          echo "$PROMPT" > /tmp/prompt.txt
+          # Use heredoc for multiline output
+          {
+            echo "content<<PROMPT_EOF"
+            echo "$PROMPT"
+            echo "PROMPT_EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Make the call
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          claude --print "$(cat /tmp/prompt.txt)"
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          claude_args: |
+            --mcp-config /tmp/mcp-config.json
+            --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call
+          max_turns: "20"
