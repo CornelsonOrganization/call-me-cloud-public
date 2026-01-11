@@ -76,10 +76,17 @@ server.on('request', async (req: IncomingMessage, res: ServerResponse) => {
     return;
   }
 
-  // Twilio webhook
+  // Twilio webhook (voice calls)
   if (url.pathname === '/twiml') {
     // Forward to call manager's webhook handler
     callManager.handleWebhook(req, res);
+    return;
+  }
+
+  // WhatsApp webhook (messaging)
+  if (url.pathname === '/whatsapp' && req.method === 'POST') {
+    // Forward to call manager's WhatsApp webhook handler
+    callManager.handleWhatsAppWebhook(req, res);
     return;
   }
 

@@ -17,6 +17,9 @@ import {
   generateWebSocketToken,
   validateWebSocketToken,
 } from './webhook-security.js';
+import { RateLimiter } from './rate-limiter.js';
+import { validateWhatsAppMessage, hashForLogging } from './webhook-validation.js';
+import { detectCallRequest } from './keyword-detection.js';
 import type { StatusCallbackEvent } from './providers/phone-twilio.js';
 
 interface CallState {
@@ -75,6 +78,9 @@ class SessionManager {
   private conversationToPhone = new Map<string, string>();
   private phoneToConversation = new Map<string, string>();
 
+  // Fast O(1) lookup by conversation SID (for webhook routing)
+  private conversationToCallId = new Map<string, string>();
+
   constructor(private config: ServerConfig) {}
 
   /**
@@ -91,6 +97,7 @@ class SessionManager {
 
     this.conversationToPhone.set(conversationSid, phoneNumber);
     this.phoneToConversation.set(phoneNumber, conversationSid);
+    this.conversationToCallId.set(conversationSid, callId);  // For O(1) webhook routing
 
     console.error(`[${callId}] Phone mapping registered for conversation ${conversationSid} (phone hash: ${this.hashPhone(phoneNumber)})`);
   }
@@ -119,15 +126,15 @@ class SessionManager {
   }
 
   /**
-   * Get session by conversation SID
+   * Get session by conversation SID (O(1) constant-time lookup)
+   * Uses Map for fast lookup to prevent timing attacks
    */
   getSessionByConversation(conversationSid: string): CallState | undefined {
-    for (const state of this.sessions.values()) {
-      if (state.conversationSid === conversationSid) {
-        return state;
-      }
+    const callId = this.conversationToCallId.get(conversationSid);
+    if (!callId) {
+      return undefined;
     }
-    return undefined;
+    return this.sessions.get(callId);
   }
 
   /**
@@ -263,6 +270,7 @@ class SessionManager {
         this.phoneToConversation.delete(phone);
       }
       this.conversationToPhone.delete(state.conversationSid);
+      this.conversationToCallId.delete(state.conversationSid);  // Clean up O(1) lookup map
     }
 
     // Remove session
@@ -330,10 +338,12 @@ export class CallManager {
   private config: ServerConfig;
   private currentCallId = 0;
   private externalServer: boolean = false;
+  private rateLimiter: RateLimiter;  // WhatsApp rate limiting
 
   constructor(config: ServerConfig, existingServer?: ReturnType<typeof createServer>) {
     this.config = config;
     this.sessionManager = new SessionManager(config);
+    this.rateLimiter = new RateLimiter();  // Initialize rate limiter with defaults
     if (existingServer) {
       this.httpServer = existingServer;
       this.externalServer = true;
@@ -840,6 +850,278 @@ export class CallManager {
       }
     } catch (error) {
       console.error(`Error handling webhook ${eventType}:`, error);
+    }
+  }
+
+  /**
+   * Handle WhatsApp webhook from Twilio Conversations
+   *
+   * SECURITY ARCHITECTURE (Defense in Depth):
+   * 1. Signature validation (prevent forged webhooks)
+   * 2. Rate limiting (prevent DoS attacks)
+   * 3. Input validation (prevent injection attacks)
+   * 4. Uniform responses (prevent session enumeration)
+   * 5. Constant-time session lookup (prevent timing attacks)
+   *
+   * @param req HTTP request from Twilio
+   * @param res HTTP response to send back
+   */
+  async handleWhatsAppWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const startTime = Date.now();
+
+    // Read request body
+    let body = '';
+    const MAX_WEBHOOK_BODY_SIZE = 100 * 1024; // 100KB limit
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_WEBHOOK_BODY_SIZE) {
+        req.destroy(new Error('Webhook body too large'));
+      }
+    });
+
+    req.on('end', async () => {
+      try {
+        // Parse form-urlencoded body
+        const params = new URLSearchParams(body);
+        const bodyObj: Record<string, string> = {};
+        for (const [key, value] of params.entries()) {
+          bodyObj[key] = value;
+        }
+
+        // ============================================================
+        // STEP 1: Signature Validation (CRITICAL - FIRST LINE OF DEFENSE)
+        // ============================================================
+
+        const signature = req.headers['x-twilio-signature'] as string | undefined;
+        const webhookUrl = `${this.config.publicUrl}/whatsapp`;
+
+        const isValid = validateTwilioSignature(
+          this.config.providerConfig.phoneAuthToken,
+          signature,
+          webhookUrl,
+          params
+        );
+
+        if (!isValid) {
+          console.error('[Security] Invalid WhatsApp webhook signature');
+          // Return 401 with empty response (don't leak info)
+          res.writeHead(401);
+          res.end('');
+          return;
+        }
+
+        // ============================================================
+        // STEP 2: Rate Limiting (CRITICAL - PREVENT DOS)
+        // ============================================================
+
+        const conversationSid = bodyObj.ConversationSid || '';
+        const author = bodyObj.Author || ''; // Phone number (whatsapp:+1234567890)
+
+        if (this.rateLimiter.isRateLimited(author, conversationSid)) {
+          console.error('[Security] Rate limit exceeded', {
+            conversationSid,
+            authorHash: hashForLogging(author)
+          });
+
+          // Return 429 with empty response
+          res.writeHead(429);
+          res.end('');
+          return;
+        }
+
+        // ============================================================
+        // STEP 3: Input Validation (CRITICAL - PREVENT INJECTION)
+        // ============================================================
+
+        const validation = validateWhatsAppMessage(bodyObj);
+        if (!validation.valid) {
+          console.error('[Security] Invalid WhatsApp message payload', {
+            error: validation.error,
+            conversationSid
+          });
+
+          // Return 200 (don't retry invalid payloads)
+          res.writeHead(200);
+          res.end('');
+          return;
+        }
+
+        const messageBody = validation.sanitized!;
+
+        // ============================================================
+        // STEP 4: Session Lookup (CONSTANT TIME - PREVENT TIMING ATTACKS)
+        // ============================================================
+
+        const session = this.sessionManager.getSessionByConversation(conversationSid);
+
+        // UNIFORM RESPONSE: Same response whether session found or not
+        // This prevents session enumeration attacks
+
+        if (!session) {
+          // Session not found (expired, invalid, or never existed)
+          console.error('[WhatsApp] Message for unknown conversation', {
+            conversationSid,
+            // DO NOT log phone number
+          });
+
+          // Return 200 with empty body (SAME as success case)
+          res.writeHead(200);
+          res.end('');
+          return;
+        }
+
+        // ============================================================
+        // STEP 5: Process Message
+        // ============================================================
+
+        try {
+          // Refresh inactivity timeout
+          this.sessionManager.refreshInactivityTimeout(session);
+
+          // Check for keyword ("call me")
+          if (detectCallRequest(messageBody)) {
+            // User wants to switch to voice
+            console.error(`[${session.callId}] User requested voice call via WhatsApp`);
+            await this.initiateVoiceCallFromWhatsApp(session, messageBody);
+          } else {
+            // Route message to MCP client (placeholder - to be implemented in Phase 5)
+            console.error(`[${session.callId}] Received WhatsApp message: ${messageBody.substring(0, 50)}...`);
+            await this.routeMessageToMCP(session, messageBody);
+          }
+
+          // Return 200 with empty body (SAME as failure case)
+          res.writeHead(200);
+          res.end('');
+
+        } catch (error) {
+          console.error('[WhatsApp] Error processing message', {
+            error,
+            sessionId: session.callId,
+            conversationSid
+          });
+
+          // Still return 200 (don't let Twilio retry errors)
+          res.writeHead(200);
+          res.end('');
+        }
+
+        // Log timing (for monitoring)
+        const duration = Date.now() - startTime;
+        if (duration > 1000) {
+          console.error('[Performance] Slow WhatsApp webhook processing', {
+            duration,
+            conversationSid
+          });
+        }
+      } catch (error) {
+        console.error('[WhatsApp] Fatal webhook error:', error);
+        res.writeHead(500);
+        res.end('');
+      }
+    });
+
+    req.on('error', (error) => {
+      console.error('[WhatsApp] Request error:', error);
+      res.writeHead(400);
+      res.end('');
+    });
+  }
+
+  /**
+   * Initiate voice call when user requests it via WhatsApp
+   *
+   * This happens when user sends "call me" or similar keyword via WhatsApp.
+   * We attempt to upgrade the conversation from WhatsApp to voice.
+   *
+   * @param session Current session state (in WhatsApp mode)
+   * @param userMessage The message that triggered the call request
+   */
+  private async initiateVoiceCallFromWhatsApp(session: CallState, userMessage: string): Promise<void> {
+    console.error(`[${session.callId}] Initiating voice call from WhatsApp (keyword detected)`);
+
+    // Get phone number from secure mapping
+    const phoneNumber = this.sessionManager.getPhoneForConversation(session.conversationSid!);
+    if (!phoneNumber) {
+      console.error(`[${session.callId}] Cannot initiate call: phone number not found`);
+      // Send error message to user via WhatsApp
+      if (this.config.messagingProvider && session.conversationSid) {
+        await this.config.messagingProvider.sendMessage(
+          session.conversationSid,
+          "Sorry, I couldn't retrieve your phone number to call you. Please try again.",
+          false
+        );
+      }
+      return;
+    }
+
+    try {
+      // Attempt to initiate call
+      const callControlId = await this.config.providers.phone.initiateCall(
+        phoneNumber,
+        this.config.phoneNumber,
+        `${this.config.publicUrl}/twiml`
+      );
+
+      // Update session state to voice mode
+      session.contactMode = 'voice';
+      session.callControlId = callControlId;
+      this.callControlIdToCallId.set(callControlId, session.callId);
+
+      console.error(`[${session.callId}] Voice call initiated: ${callControlId}`);
+
+      // Send confirmation to user via WhatsApp (they'll get a call shortly)
+      if (this.config.messagingProvider && session.conversationSid) {
+        await this.config.messagingProvider.sendMessage(
+          session.conversationSid,
+          "Calling you now...",
+          false
+        );
+      }
+
+    } catch (error) {
+      console.error(`[${session.callId}] Failed to initiate voice call:`, error);
+
+      // Send error message to user via WhatsApp
+      if (this.config.messagingProvider && session.conversationSid) {
+        await this.config.messagingProvider.sendMessage(
+          session.conversationSid,
+          "Sorry, I couldn't place a call to you right now. Let's continue via WhatsApp.",
+          false
+        );
+      }
+    }
+  }
+
+  /**
+   * Route WhatsApp message to MCP client
+   *
+   * PLACEHOLDER: This will be fully implemented in Phase 5 (MCP Client Updates)
+   *
+   * For now, this just logs the message and sends a placeholder response.
+   * Phase 5 will add proper message routing to the MCP client.
+   *
+   * @param session Current session state
+   * @param message User's message from WhatsApp
+   */
+  private async routeMessageToMCP(session: CallState, message: string): Promise<void> {
+    // Add to conversation history
+    session.conversationHistory.push({ speaker: 'user', message });
+
+    // PLACEHOLDER: Phase 5 will add proper MCP routing
+    // For now, just send a simple acknowledgment
+    console.error(`[${session.callId}] Routing message to MCP client (Phase 5 implementation needed)`);
+
+    // Send placeholder response
+    if (this.config.messagingProvider && session.conversationSid) {
+      const response = "Message received via WhatsApp. (MCP integration coming in Phase 5)";
+      await this.config.messagingProvider.sendMessage(
+        session.conversationSid,
+        response,
+        false
+      );
+
+      // Add response to history
+      session.conversationHistory.push({ speaker: 'claude', message: response });
     }
   }
 
