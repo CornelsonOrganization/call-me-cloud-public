@@ -210,7 +210,7 @@ jobs:
           prompt: ${{ steps.prompt.outputs.content }}
           claude_args: |
             --mcp-config /tmp/mcp-config.json
-            --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Glob,Grep
+            --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,Read,Edit,Write,Glob,Grep,Bash,Task
 
       - name: Re-authenticate git
         run: |
