@@ -281,17 +281,60 @@ See [CLAUDE.md](CLAUDE.md) for security implementation details.
 - **Outbound calls only** - Claude calls you; you cannot call Claude. This is intentional for security reasons: allowing inbound calls to wake up a terminal session with elevated permissions would be dangerous when you can't actively monitor it.
 - **Miss the call, miss the conversation** - If you don't answer, the conversation stops. There's no voicemail or retry. Use `claude --resume` when you're back at your laptop to continue.
 
+## Use Cases
+
+See [docs/USE-CASES.md](docs/USE-CASES.md) for 10 detailed storyboards showing when voice communication adds value:
+
+- **Missed Call Recovery** - Seamless voice-to-SMS continuity
+- **Build Watcher** - "Call me when CI finishes"
+- **Dangerous Operation Approval** - Voice confirmation before `git push --force`
+- **Driving Developer** - Productive commute time
+- **Accessibility-First** - Voice-first coding for RSI
+- And 5 more...
+
 ## Roadmap
 
-**SMS Fallback** (pending Twilio approval)
+### SMS Fallback (pending Twilio approval)
 
-The plan is to add SMS as a fallback when calls go unanswered:
-1. Call initiates
-2. If no answer after 25 seconds, send an SMS with the message
-3. You have 7 minutes to text back a response
-4. If no response, the conversation times out (resume later with `claude --resume`)
+When calls go unanswered, automatically fall back to SMS and continue the conversation via text.
 
-This requires Twilio A2P 10DLC registration (proving you won't spam people), which is in progress.
+| Aspect | Behavior |
+|--------|----------|
+| Trigger | After configurable timeout (`CALLME_SMS_TIMEOUT_SECONDS` env var) |
+| Conversation | Full text conversation until user says "call me" |
+| Detection | Fuzzy matching ("call me", "can you call", "let's talk", "phone me") |
+| Rate limiting | None |
+
+**Flow:**
+1. Call initiates, rings for configured timeout
+2. No answer → SMS sent with the original message
+3. User can reply via text indefinitely
+4. User texts "call me" (or similar) → Claude calls back
+5. 7-minute inactivity → session closes (resume with `claude --resume`)
+
+**Status:** Requires Twilio A2P 10DLC registration. Form filed, awaiting approval.
+
+See [DESIGN-sms-fallback.md](DESIGN-sms-fallback.md) for technical details.
+
+### Scheduled & Proactive Calls (planned)
+
+Let Claude schedule callbacks and proactively call when events occur.
+
+| Aspect | Behavior |
+|--------|----------|
+| Time-based | "Call me in 30 minutes" |
+| Event-based | "Call me when the Railway build finishes" |
+| Condition-based | "Call me if tests fail" |
+| Initiation | Both user-requested and Claude-proposed |
+| Persistence | Ephemeral (dies with session) for v1 |
+
+**Examples:**
+- "Push this and call me when CI finishes"
+- "Call me in 10 minutes to review the PR"
+- "If the deployment fails, call me"
+
+**Event sources (v1):** Railway webhooks
+**Event sources (future):** GitHub Actions, custom webhooks
 
 ## Contributing
 
