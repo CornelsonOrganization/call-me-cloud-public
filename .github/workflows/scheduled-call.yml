@@ -1,0 +1,133 @@
+# Scheduled Call with Dynamic Prompt
+#
+# Trigger this workflow from Claude to schedule a phone call.
+# Claude Code will call you, discuss the prompt, and commit changes.
+#
+# Secrets needed:
+#   - ANTHROPIC_API_KEY
+#   - CALLME_API_KEY
+#   - CALLME_CLOUD_URL
+
+name: Scheduled Call
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'What should Claude discuss/work on?'
+        required: true
+        type: string
+      delay_minutes:
+        description: 'Minutes to wait before calling (0 = immediate)'
+        required: false
+        default: '0'
+        type: string
+      branch:
+        description: 'Branch name for commits (leave empty to auto-generate)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: scheduled-call-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # Max runtime for long conversations
+
+    steps:
+      - name: Wait for scheduled time
+        if: inputs.delay_minutes != '0'
+        run: |
+          DELAY=${{ inputs.delay_minutes }}
+          echo "Waiting $DELAY minutes before calling..."
+          sleep "${DELAY}m"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper branching
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup branch
+        id: branch
+        run: |
+          if [ -n "${{ inputs.branch }}" ]; then
+            BRANCH="${{ inputs.branch }}"
+          else
+            # Auto-generate branch name from timestamp
+            BRANCH="claude/call-$(date +%Y%m%d-%H%M%S)"
+          fi
+          echo "name=$BRANCH" >> $GITHUB_OUTPUT
+
+          # Create and checkout branch
+          git checkout -b "$BRANCH"
+          echo "Created branch: $BRANCH"
+
+      - name: Configure git
+        run: |
+          git config user.name "Claude (GitHub Actions)"
+          git config user.email "claude@github-actions.local"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Configure MCP
+        run: |
+          mkdir -p ~/.claude
+          cat > ~/.claude/settings.json << 'EOF'
+          {
+            "mcpServers": {
+              "call-me-cloud": {
+                "command": "npx",
+                "args": ["-y", "call-me-cloud-mcp@latest"],
+                "env": {
+                  "CALLME_CLOUD_URL": "${{ secrets.CALLME_CLOUD_URL }}",
+                  "CALLME_API_KEY": "${{ secrets.CALLME_API_KEY }}"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Run Claude with prompt
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Build the full prompt with context
+          cat > /tmp/prompt.txt << 'PROMPT_EOF'
+          You are running in a GitHub Actions environment for ${{ github.repository }}.
+
+          IMPORTANT INSTRUCTIONS:
+          1. Call the user FIRST using initiate_call to discuss the task
+          2. Have a conversation to clarify requirements
+          3. Implement what they request
+          4. Commit your changes to this branch: ${{ steps.branch.outputs.name }}
+          5. Before ending the call, summarize what you did and ask if they want changes
+
+          USER'S REQUEST:
+          ${{ inputs.prompt }}
+
+          Remember: This is a phone conversation while they're walking. Keep messages
+          concise and conversational. Ask clarifying questions. Confirm before making
+          significant changes.
+          PROMPT_EOF
+
+          claude --print "$(cat /tmp/prompt.txt)"
+
+      - name: Push changes
+        run: |
+          # Check if there are commits to push
+          if git log origin/${{ github.ref_name }}..${{ steps.branch.outputs.name }} --oneline | grep -q .; then
+            git push -u origin ${{ steps.branch.outputs.name }}
+            echo "Pushed branch: ${{ steps.branch.outputs.name }}"
+            echo "Create PR: https://github.com/${{ github.repository }}/compare/${{ steps.branch.outputs.name }}?expand=1"
+          else
+            echo "No commits to push"
+          fi
