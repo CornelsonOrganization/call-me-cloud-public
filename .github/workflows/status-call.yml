@@ -1,0 +1,128 @@
+# Example: Phone call status reports via GitHub Actions
+#
+# Copy this workflow to your repo and configure the secrets:
+#   - ANTHROPIC_API_KEY: Your Claude API key
+#   - CALLME_API_KEY: Your Call-Me Cloud API key
+#   - CALLME_CLOUD_URL: Your Railway deployment URL
+#
+# Triggers:
+#   - Daily at 9 AM UTC on weekdays
+#   - After any workflow completes (adjust 'workflows' list as needed)
+#   - Manually via workflow_dispatch
+
+name: Status Call
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'  # 9 AM UTC, Mon-Fri
+
+  workflow_run:
+    workflows: ["CI", "Deploy"]  # Add your workflow names
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Custom prompt for Claude (what should the call be about?)'
+        required: false
+        default: ''
+
+# Prevent concurrent calls
+concurrency:
+  group: status-call
+  cancel-in-progress: false
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    # Only run on failures, or for scheduled/manual triggers
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'failure'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 10  # Get recent history for context
+
+      - name: Gather context
+        id: ctx
+        run: |
+          # Basic repo info
+          echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+          # Recent commits (escaped for JSON)
+          COMMITS=$(git log --oneline -5 | head -c 500)
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Trigger info
+          echo "event=${{ github.event_name }}" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "workflow_name=${{ github.event.workflow_run.name }}" >> $GITHUB_OUTPUT
+            echo "workflow_status=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Configure MCP
+        run: |
+          mkdir -p ~/.claude
+          cat > ~/.claude/settings.json << EOF
+          {
+            "mcpServers": {
+              "call-me-cloud": {
+                "command": "npx",
+                "args": ["-y", "call-me-cloud-mcp@latest"],
+                "env": {
+                  "CALLME_CLOUD_URL": "${{ secrets.CALLME_CLOUD_URL }}",
+                  "CALLME_API_KEY": "${{ secrets.CALLME_API_KEY }}"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Build prompt
+        id: prompt
+        run: |
+          if [ -n "${{ inputs.prompt }}" ]; then
+            # Manual trigger with custom prompt
+            PROMPT="${{ inputs.prompt }}"
+          elif [ "${{ steps.ctx.outputs.event }}" = "workflow_run" ]; then
+            # Workflow completion (likely failure since we filter above)
+            PROMPT="URGENT: Call the user immediately. The ${{ steps.ctx.outputs.workflow_name }} workflow just FAILED on ${{ steps.ctx.outputs.repo }}.
+
+          Latest commit: $(git log -1 --pretty='%s')
+          Branch: ${{ steps.ctx.outputs.branch }}
+
+          Keep it brief but get their attention. Ask if they want details or help debugging."
+          else
+            # Scheduled daily update
+            PROMPT="Call the user with a quick daily status update for ${{ steps.ctx.outputs.repo }}.
+
+          Recent activity:
+          ${{ steps.ctx.outputs.commits }}
+
+          Keep it conversational. Ask if they want to discuss any recent changes or priorities."
+          fi
+
+          # Write to file to handle multiline
+          echo "$PROMPT" > /tmp/prompt.txt
+
+      - name: Make the call
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude --print "$(cat /tmp/prompt.txt)"
