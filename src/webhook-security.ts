@@ -5,7 +5,7 @@
  * cryptographic signatures from phone providers.
  */
 
-import { createHmac, verify } from 'crypto';
+import { createHmac, verify, timingSafeEqual } from 'crypto';
 
 /**
  * Validate Twilio webhook signature
@@ -49,7 +49,19 @@ export function validateTwilioSignature(
     .update(dataToSign)
     .digest('base64');
 
-  const valid = signature === expectedSignature;
+  // Use timing-safe comparison to prevent timing attacks
+  // Pad to equal length to avoid leaking length information
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+  const receivedBuffer = Buffer.from(signature, 'utf8');
+  const maxLength = Math.max(expectedBuffer.length, receivedBuffer.length);
+  const paddedExpected = Buffer.alloc(maxLength);
+  const paddedReceived = Buffer.alloc(maxLength);
+  expectedBuffer.copy(paddedExpected);
+  receivedBuffer.copy(paddedReceived);
+
+  const contentsMatch = timingSafeEqual(paddedExpected, paddedReceived);
+  const lengthsMatch = expectedBuffer.length === receivedBuffer.length;
+  const valid = contentsMatch && lengthsMatch;
 
   if (!valid) {
     console.error('[Security] Twilio signature mismatch');
@@ -159,6 +171,10 @@ export function generateWebSocketToken(): string {
 
 /**
  * Validate a WebSocket token from the URL
+ *
+ * Uses Node's built-in timingSafeEqual for constant-time comparison.
+ * The function pads tokens to equal length before comparison to avoid
+ * leaking length information through timing side-channels.
  */
 export function validateWebSocketToken(
   expectedToken: string,
@@ -169,20 +185,25 @@ export function validateWebSocketToken(
     return false;
   }
 
-  // Use timing-safe comparison to prevent timing attacks
-  if (expectedToken.length !== receivedToken.length) {
-    console.error('[Security] WebSocket token length mismatch');
-    return false;
-  }
+  // Convert to buffers for timing-safe comparison
+  const expectedBuffer = Buffer.from(expectedToken, 'utf8');
+  const receivedBuffer = Buffer.from(receivedToken, 'utf8');
 
-  let result = 0;
-  for (let i = 0; i < expectedToken.length; i++) {
-    result |= expectedToken.charCodeAt(i) ^ receivedToken.charCodeAt(i);
-  }
+  // Pad shorter buffer to match longer length (prevents length leakage)
+  // We compare padded buffers AND check length separately
+  const maxLength = Math.max(expectedBuffer.length, receivedBuffer.length);
+  const paddedExpected = Buffer.alloc(maxLength);
+  const paddedReceived = Buffer.alloc(maxLength);
+  expectedBuffer.copy(paddedExpected);
+  receivedBuffer.copy(paddedReceived);
 
-  const valid = result === 0;
+  // Use Node's built-in timing-safe comparison
+  const contentsMatch = timingSafeEqual(paddedExpected, paddedReceived);
+  const lengthsMatch = expectedBuffer.length === receivedBuffer.length;
+
+  const valid = contentsMatch && lengthsMatch;
   if (!valid) {
-    console.error('[Security] WebSocket token mismatch');
+    console.error('[Security] WebSocket token validation failed');
   }
 
   return valid;
