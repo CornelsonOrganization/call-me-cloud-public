@@ -2,16 +2,14 @@
 # These skills are loaded when office-mode is selected in the workflow
 
 skills:
-  # Official Anthropic Office skills (via plugin marketplace)
-  # These are the same production-grade skills used in claude.ai
-  plugins:
-    - name: anthropics/skills
-      description: Official Anthropic Agent Skills for document generation
-      skills:
-        - docx   # Word documents
-        - xlsx   # Excel spreadsheets
-        - pptx   # PowerPoint presentations
-        - pdf    # PDF documents
+  # Office document capabilities (docx, xlsx, pptx, pdf)
+  # These are built-in Claude Code features enabled via the Skill tool in allowedTools
+  # No external plugin required - just ensure 'Skill' is in allowedTools
+  builtin:
+    - docx   # Word documents
+    - xlsx   # Excel spreadsheets
+    - pptx   # PowerPoint presentations
+    - pdf    # PDF documents
 
   # Project-level custom skills (loaded from .claude/skills/)
   # Uncomment when company-templates skill is created
@@ -26,7 +24,7 @@ skills:
   #   - poppler-utils        # PDF utilities (pdftoppm, pdftotext)
   #   - pandoc               # Format conversion
 
-  # Python dependencies for custom scripts
+  # Python dependencies for custom document processing scripts
   # These are fast to install (~15 sec)
   python_deps:
     - python-docx>=0.8.11    # Word document creation

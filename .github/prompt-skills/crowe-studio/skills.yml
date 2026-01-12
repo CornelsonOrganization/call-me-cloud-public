@@ -2,22 +2,21 @@
 # These skills are loaded when crowe-studio is selected in the workflow
 
 skills:
-  # Official Anthropic Office skills (via plugin marketplace)
-  plugins:
-    - name: anthropics/skills
-      description: Official Anthropic Agent Skills for document generation
-      skills:
-        - docx   # Word documents with Crowe branding
-        - xlsx   # Excel spreadsheets with theme colors
-        - pptx   # PowerPoint with 9 Formatting Basics
-        - pdf    # PDF documents
+  # Office document capabilities (docx, xlsx, pptx, pdf)
+  # These are built-in Claude Code features enabled via the Skill tool in allowedTools
+  # No external plugin required - just ensure 'Skill' is in allowedTools
+  builtin:
+    - docx   # Word documents with Crowe branding
+    - xlsx   # Excel spreadsheets with theme colors
+    - pptx   # PowerPoint with 9 Formatting Basics
+    - pdf    # PDF documents
 
   # Project-level custom skills (loaded from .claude/skills/)
   # These provide Crowe Studio formatting validation
   # project:
   #   - crowe-studio-formatting-basics
 
-  # Python dependencies for document manipulation
+  # Python dependencies for document manipulation (used by skills)
   python_deps:
     - python-docx>=0.8.11    # Word document creation
     - openpyxl>=3.1.0        # Excel spreadsheet creation

@@ -253,10 +253,11 @@ jobs:
             SYSTEM_DEPS=$(yq -r '.skills.system_deps[]? // empty' "$SKILLS_FILE" 2>/dev/null | tr '\n' ' ' || echo "")
             echo "system_deps=$SYSTEM_DEPS" >> $GITHUB_OUTPUT
 
-            # Check if official office skills plugin is needed
-            if yq -e '.skills.plugins[]? | select(.name == "anthropics/skills")' "$SKILLS_FILE" &>/dev/null; then
+            # Check if built-in office skills are configured
+            if yq -e '.skills.builtin[]?' "$SKILLS_FILE" &>/dev/null; then
               echo "has_office_skills=true" >> $GITHUB_OUTPUT
-              echo "✓ Office skills plugin enabled"
+              BUILTIN_SKILLS=$(yq -r '.skills.builtin[]?' "$SKILLS_FILE" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+              echo "✓ Built-in skills enabled: $BUILTIN_SKILLS"
             else
               echo "has_office_skills=false" >> $GITHUB_OUTPUT
             fi
@@ -381,26 +382,22 @@ jobs:
           echo "id=$MODEL_ID" >> $GITHUB_OUTPUT
           echo "Using model: $MODEL_ID"
 
-      - name: Merge skills plugins
+      - name: Prepare final plugin list
         id: merged_plugins
         env:
           BASE_PLUGINS: ${{ steps.plugins.outputs.PLUGIN_NAMES }}
           HAS_OFFICE_SKILLS: ${{ steps.prompt_skills.outputs.has_office_skills }}
         run: |
-          # Start with base plugins from setup-plugins.sh
+          # Use base plugins from setup-plugins.sh
           PLUGINS="${BASE_PLUGINS:-}"
 
-          # Add office skills plugin if required by skills.yml
+          # Note: Office skills (docx, xlsx, pptx, pdf) are built-in Claude Code capabilities
+          # They're enabled via the 'Skill' tool in allowedTools, not as plugins
           if [ "$HAS_OFFICE_SKILLS" = "true" ]; then
-            if [ -n "$PLUGINS" ]; then
-              PLUGINS=$(printf "%s\n%s" "$PLUGINS" "anthropics/skills")
-            else
-              PLUGINS="anthropics/skills"
-            fi
-            echo "✓ Added anthropics/skills plugin for office documents"
+            echo "✓ Office skills enabled via Skill tool (built-in capability)"
           fi
 
-          # Output merged plugin list
+          # Output final plugin list
           {
             echo "names<<PLUGINS_EOF"
             echo "$PLUGINS"

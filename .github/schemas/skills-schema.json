@@ -25,9 +25,20 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "builtin": {
+          "type": "array",
+          "description": "Built-in Claude Code capabilities (enabled via Skill tool)",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "description": "Built-in skill name (e.g., docx, xlsx, pptx, pdf)",
+            "pattern": "^[a-z0-9-]+$",
+            "maxLength": 50
+          }
+        },
         "plugins": {
           "type": "array",
-          "description": "Official plugins to load",
+          "description": "External plugins to load from marketplace",
           "maxItems": 10,
           "items": {
             "type": "object",
