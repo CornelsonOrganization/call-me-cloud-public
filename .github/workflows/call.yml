@@ -17,6 +17,15 @@ on:
 
   workflow_dispatch:
     inputs:
+      model:
+        description: 'Claude model to use'
+        required: false
+        default: 'sonnet'
+        type: choice
+        options:
+          - sonnet
+          - opus
+          - haiku
       prompt:
         description: 'What should Claude discuss/work on?'
         required: false
@@ -238,6 +247,29 @@ jobs:
             echo "PROMPT_EOF"
           } >> $GITHUB_OUTPUT
 
+      - name: Determine model identifier
+        id: model
+        env:
+          MODEL_INPUT: ${{ inputs.model }}
+        run: |
+          case "$MODEL_INPUT" in
+            opus)
+              MODEL_ID="claude-opus-4-5-20251101"
+              ;;
+            haiku)
+              MODEL_ID="claude-haiku-4-20250414"
+              ;;
+            sonnet|"")
+              MODEL_ID="claude-sonnet-4-20250514"
+              ;;
+            *)
+              echo "::warning::Unknown model '$MODEL_INPUT', defaulting to sonnet"
+              MODEL_ID="claude-sonnet-4-20250514"
+              ;;
+          esac
+          echo "id=$MODEL_ID" >> $GITHUB_OUTPUT
+          echo "Using model: $MODEL_ID"
+
       - name: Run Claude with call capability
         uses: anthropics/claude-code-action@v1
         with:
@@ -246,6 +278,7 @@ jobs:
           plugins: ${{ steps.plugins.outputs.PLUGIN_NAMES }}
           plugin_marketplaces: ${{ steps.plugins.outputs.PLUGIN_MARKETPLACE }}
           claude_args: |
+            --model ${{ steps.model.outputs.id }}
             --mcp-config /tmp/mcp-config.json
             --allowedTools mcp__call-me-cloud__initiate_call,mcp__call-me-cloud__continue_call,mcp__call-me-cloud__speak_to_user,mcp__call-me-cloud__end_call,mcp__call-me-cloud__send_message,Read,Edit,Write,Glob,Grep,Bash,Task
 
