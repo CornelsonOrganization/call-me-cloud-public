@@ -1,0 +1,40 @@
+# Skills configuration for crowe-studio base prompt
+# These skills are loaded when crowe-studio is selected in the workflow
+
+skills:
+  # Official Anthropic Office skills (via plugin marketplace)
+  plugins:
+    - name: anthropics/skills
+      description: Official Anthropic Agent Skills for document generation
+      skills:
+        - docx   # Word documents with Crowe branding
+        - xlsx   # Excel spreadsheets with theme colors
+        - pptx   # PowerPoint with 9 Formatting Basics
+        - pdf    # PDF documents
+
+  # Project-level custom skills (loaded from .claude/skills/)
+  # These provide Crowe Studio formatting validation
+  # project:
+  #   - crowe-studio-formatting-basics
+
+  # Python dependencies for document manipulation
+  python_deps:
+    - python-docx>=0.8.11    # Word document creation
+    - openpyxl>=3.1.0        # Excel spreadsheet creation
+    - python-pptx>=0.6.21    # PowerPoint creation
+    - pypdf>=3.0.0           # PDF reading/manipulation
+
+# Theme configuration reference
+# See templates/themes/crowe-studio.json for complete theme spec
+#
+# Key colors:
+#   Primary: #D38938 (Studio Orange)
+#   Secondary: #0F2D5E (Crowe Blue)
+#   Success: #48A188 (Teal)
+#   Warning: #F3BC44 (Yellow)
+#   Error: #B02418 (Red)
+#   Neutral: #CCCCCC (Grey)
+#
+# Typography:
+#   Body: Arial (minimum 9pt)
+#   Headings: Arial Black
