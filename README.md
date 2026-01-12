@@ -494,7 +494,9 @@ The workflow automatically:
 | `CALLME_PHONE_NUMBER` | Yes | - | Your Twilio phone number (format: +1XXXYYYZZZZ) |
 | `CALLME_USER_PHONE_NUMBER` | Yes | - | Your personal phone number to receive calls (format: +1XXXYYYZZZZ) |
 | `CALLME_OPENAI_API_KEY` | Yes | - | OpenAI API key for TTS/STT (Realtime API) |
+| `CALLME_TTS_MODEL` | No | `gpt-4o-mini-tts` | TTS model (`gpt-4o-mini-tts` or `tts-1`) |
 | `CALLME_TTS_VOICE` | No | `ballad` | TTS voice (see [Voices](#available-voices)) |
+| `CALLME_TTS_INSTRUCTIONS` | No | - | Voice style instructions, e.g. "Speak cheerfully" (gpt-4o-mini-tts only) |
 | `OPENAI_API_BASE_URL` | No | - | Regional OpenAI endpoint (e.g., `us.api.openai.com`) |
 
 > **Generating `CALLME_API_KEY`:** This is a secret you create yourself to secure communication between your MCP client and cloud server. Generate a secure random string (32+ characters) using:
@@ -512,7 +514,9 @@ The workflow automatically:
 
 ### Available Voices
 
-OpenAI TTS voices: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`
+**gpt-4o-mini-tts** (default): `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`
+
+**tts-1**: `alloy`, `echo`, `fable`, `nova`, `onyx`, `shimmer`
 
 ## API Reference
 

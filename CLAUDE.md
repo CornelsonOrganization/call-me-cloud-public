@@ -127,6 +127,8 @@ Configure these in your Claude Code web environment settings:
 |----------|---------|-------------|
 | `CALLME_PUBLIC_URL` | auto | Public URL (auto-detected on Railway/Render) |
 | `CALLME_PORT` | `3333` | Server port |
-| `CALLME_TTS_VOICE` | `onyx` | OpenAI TTS voice |
+| `CALLME_TTS_MODEL` | `gpt-4o-mini-tts` | OpenAI TTS model (`gpt-4o-mini-tts` or `tts-1`) |
+| `CALLME_TTS_VOICE` | `ballad` | OpenAI TTS voice |
+| `CALLME_TTS_INSTRUCTIONS` | - | Voice style instructions (gpt-4o-mini-tts only) |
 | `CALLME_STT_MODEL` | `gpt-4o-transcribe` | OpenAI STT model |
 | `CALLME_TRANSCRIPT_TIMEOUT_MS` | `180000` | Transcript timeout (3 min) |

@@ -2,9 +2,12 @@
  * OpenAI TTS Provider
  *
  * Cloud-based TTS, no self-hosting required.
- * More expensive than self-hosted alternatives but zero setup.
+ * Supports both tts-1 and gpt-4o-mini-tts models.
  *
- * Pricing: ~$15/1M characters
+ * gpt-4o-mini-tts (default): Steerable voice with instructions support, more voices
+ * tts-1: Lower latency, fewer voices, no instructions support
+ *
+ * Pricing: ~$12/1M tokens (gpt-4o-mini-tts), ~$15/1M chars (tts-1)
  */
 
 import OpenAI from 'openai';
@@ -13,8 +16,9 @@ import type { TTSProvider, TTSConfig } from './types.js';
 export class OpenAITTSProvider implements TTSProvider {
   readonly name = 'openai';
   private client: OpenAI | null = null;
-  private voice: string = 'nova';
-  private model: string = 'tts-1';
+  private voice: string = 'ballad';
+  private model: string = 'gpt-4o-mini-tts';
+  private instructions?: string;
 
   initialize(config: TTSConfig): void {
     if (!config.apiKey) {
@@ -35,10 +39,11 @@ export class OpenAITTSProvider implements TTSProvider {
     }
 
     this.client = new OpenAI({ apiKey: config.apiKey, baseURL });
-    this.voice = config.voice || 'nova';
-    this.model = config.model || 'tts-1';
+    this.voice = config.voice || 'ballad';
+    this.model = config.model || 'gpt-4o-mini-tts';
+    this.instructions = config.instructions;
 
-    console.error(`TTS provider: OpenAI (${this.model}, voice: ${this.voice}${baseURL ? `, endpoint: ${baseURL}` : ''})`);
+    console.error(`TTS provider: OpenAI (${this.model}, voice: ${this.voice}${this.instructions ? ', with instructions' : ''}${baseURL ? `, endpoint: ${baseURL}` : ''})`);
   }
 
   async synthesize(text: string): Promise<Buffer> {
@@ -50,6 +55,7 @@ export class OpenAITTSProvider implements TTSProvider {
       input: text,
       response_format: 'pcm',
       speed: 1.0,
+      ...(this.instructions && this.model.includes('gpt-4o') ? { instructions: this.instructions } : {}),
     });
 
     const arrayBuffer = await response.arrayBuffer();
@@ -69,6 +75,7 @@ export class OpenAITTSProvider implements TTSProvider {
       input: text,
       response_format: 'pcm',
       speed: 1.0,
+      ...(this.instructions && this.model.includes('gpt-4o') ? { instructions: this.instructions } : {}),
     });
 
     // Get the response body as a readable stream

@@ -35,7 +35,9 @@ export interface ProviderConfig {
 
   // OpenAI (TTS + STT)
   openaiApiKey: string;
+  ttsModel?: string;
   ttsVoice?: string;
+  ttsInstructions?: string;
   sttModel?: string;
   sttSilenceDurationMs?: number;
 
@@ -61,7 +63,9 @@ export function loadProviderConfig(): ProviderConfig {
     phoneNumber: process.env.CALLME_PHONE_NUMBER || '',
     telnyxPublicKey: process.env.CALLME_TELNYX_PUBLIC_KEY,
     openaiApiKey: process.env.CALLME_OPENAI_API_KEY || '',
-    ttsVoice: process.env.CALLME_TTS_VOICE || 'nova',
+    ttsModel: process.env.CALLME_TTS_MODEL || 'gpt-4o-mini-tts',
+    ttsVoice: process.env.CALLME_TTS_VOICE || 'ballad',
+    ttsInstructions: process.env.CALLME_TTS_INSTRUCTIONS,
     sttModel: process.env.CALLME_STT_MODEL || 'gpt-4o-transcribe',
     sttSilenceDurationMs,
     whatsappEnabled: process.env.CALLME_WHATSAPP_ENABLED === 'true',
@@ -93,7 +97,9 @@ export function createTTSProvider(config: ProviderConfig): TTSProvider {
   const provider = new OpenAITTSProvider();
   provider.initialize({
     apiKey: config.openaiApiKey,
+    model: config.ttsModel,
     voice: config.ttsVoice,
+    instructions: config.ttsInstructions,
   });
   return provider;
 }

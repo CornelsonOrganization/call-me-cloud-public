@@ -145,6 +145,7 @@ export interface TTSConfig {
   apiUrl?: string;
   voice?: string;
   model?: string;
+  instructions?: string;
 }
 
 /**
