@@ -110,12 +110,12 @@ Voice confirmation prevents catastrophic mistakes.
 </tr>
 </table>
 
-**More scenarios:** See [docs/USE-CASES.md](docs/USE-CASES.md) for 10 detailed storyboards including:
+**More scenarios:** See [docs/USE-CASES.md](docs/USE-CASES.md) for 15 detailed storyboards including:
 - **Missed Call Recovery** - Seamless voice-to-SMS continuity when you don't answer
 - **Driving Developer** - Productive commute time with hands-free conversations
-- **Accessibility-First** - Voice-first coding for developers with RSI
-- **Late Night Alert** - Minimal disruption for urgent production issues
-- And more...
+- **Power Platform Pipeline** - Low-code CI/CD, completely hands-free
+- **Meeting-to-Spec Converter** - Turn discussions into specs while commuting
+- And 11 more...
 
 ## Quick Start
 
@@ -246,6 +246,154 @@ Set environment variables in your Claude config (`~/.claude.json`):
 You: Call me to discuss the project status
 Claude: [Initiates phone call]
 ```
+
+---
+
+## Using Call-Me Cloud in Your Own Repos
+
+Want Claude to call you while working on any repository? Here's how to integrate call-me-cloud into your existing projects.
+
+### Prerequisites
+
+| Requirement | Description |
+|-------------|-------------|
+| Railway deployment | A running call-me-cloud server ([deploy here](#1-deploy-to-railway)) |
+| GitHub repository | The repo where Claude will work |
+| GitHub Secrets | `CALLME_CLOUD_URL`, `CALLME_API_KEY`, `ANTHROPIC_API_KEY` |
+
+### Quick Setup (GitHub Actions Only)
+
+1. **Copy the workflow file:**
+   ```bash
+   mkdir -p .github/workflows
+   curl -o .github/workflows/call.yml \
+     https://raw.githubusercontent.com/riverscornelson/call-me-cloud/main/.github/workflows/call.yml
+   ```
+
+2. **Add GitHub Secrets** (Settings → Secrets → Actions):
+   - `ANTHROPIC_API_KEY` - Your Anthropic API key
+   - `CALLME_API_KEY` - Same key as your Railway deployment
+   - `CALLME_CLOUD_URL` - Your Railway URL (e.g., `https://your-app.railway.app`)
+
+3. **Trigger a call:**
+   ```bash
+   gh workflow run call.yml -f prompt="Review the latest changes"
+   ```
+
+### Base Prompt System
+
+Select a persona for Claude using the `base_prompt` input. Base prompts define Claude's expertise and communication style.
+
+**Available presets:**
+| Preset | Description | Best For |
+|--------|-------------|----------|
+| `default` | Standard Claude Code behavior | General development |
+| `power-platform` | Power Platform & PAC CLI expert | Power Apps/Automate work |
+| `meeting-notes` | Design spec writer | Turning discussions into specs |
+| `code-review` | Thorough reviewer with mentorship focus | PR reviews |
+
+**Usage:**
+```bash
+gh workflow run call.yml \
+  -f base_prompt="power-platform" \
+  -f prompt="Deploy the new order processing flow"
+```
+
+**Composition:** Base prompts layer with your dynamic prompt:
+```
+Base Prompt (persona/expertise)
+    +
+Dynamic Prompt (specific task)
+    =
+What Claude sees
+```
+
+### Creating Custom Base Prompts
+
+1. **Create the directory:**
+   ```bash
+   mkdir -p .github/base-prompts
+   ```
+
+2. **Add a prompt file** (e.g., `.github/base-prompts/my-team.md`):
+   ```markdown
+   ---
+   name: My Team Workflow
+   description: Our team's conventions and practices
+   recommended_model: sonnet
+   ---
+
+   You are an expert in our team's codebase and conventions.
+
+   ## Key Files
+   - `src/api/` - Backend API handlers
+   - `scripts/deploy.sh` - Deployment script
+
+   ## Conventions
+   - Always run tests before committing
+   - Use conventional commit messages
+   ```
+
+3. **Add to workflow inputs** (edit `.github/workflows/call.yml`):
+   ```yaml
+   base_prompt:
+     options:
+       - default
+       - my-team  # Add your custom prompt
+   ```
+
+### Example: Power Platform DevKit
+
+Perfect for teams using Power Platform with CI/CD:
+
+1. **Create `.github/base-prompts/power-platform.md`** (or copy from this repo)
+
+2. **Add `CLAUDE.md` to your repo:**
+   ```markdown
+   # Power Platform Conventions
+
+   ## Solution Structure
+   - Main solution: `solutions/MainSolution/`
+   - Managed exports: `releases/`
+
+   ## Before pushing
+   - Run: `pac solution check`
+   - Export: `pac solution export --overwrite`
+   ```
+
+3. **Trigger during commute:**
+   ```bash
+   gh workflow run call.yml \
+     -f base_prompt="power-platform" \
+     -f prompt="Add a new flow for order notifications" \
+     -f delay_minutes=10
+   ```
+
+### Example: Meeting Notes → Design Specs
+
+Convert meeting discussions into formal specifications:
+
+1. **Repository structure:**
+   ```
+   meetings/
+     2025-01-10-api-design.md
+   specs/
+     (Claude writes here)
+   decisions/
+     (ADRs go here)
+   ```
+
+2. **Trigger while commuting:**
+   ```bash
+   gh workflow run call.yml \
+     -f base_prompt="meeting-notes" \
+     -f prompt="Review yesterday's API meeting and draft the auth flow spec"
+   ```
+
+3. **Claude calls you:**
+   > "Hey, I read the transcript from yesterday's API design meeting. The main decision was to use GraphQL, but I noticed some open questions about caching. Can you clarify the expected TTL?"
+
+4. **After the call:** Claude commits a formal spec to `specs/auth-flow.md`
 
 ## Configuration
 
@@ -408,14 +556,14 @@ See [CLAUDE.md](CLAUDE.md) for security implementation details.
 
 ## Use Cases
 
-See [docs/USE-CASES.md](docs/USE-CASES.md) for 10 detailed storyboards showing when voice communication adds value:
+See [docs/USE-CASES.md](docs/USE-CASES.md) for 15 detailed storyboards showing when voice communication adds value:
 
 - **Missed Call Recovery** - Seamless voice-to-SMS continuity
 - **Build Watcher** - "Call me when CI finishes"
-- **Dangerous Operation Approval** - Voice confirmation before `git push --force`
-- **Driving Developer** - Productive commute time
-- **Accessibility-First** - Voice-first coding for RSI
-- And 5 more...
+- **Power Platform Pipeline** - Low-code CI/CD, hands-free
+- **Meeting-to-Spec Converter** - Ambient context capture
+- **Release Captain** - Releases without a keyboard
+- And 10 more...
 
 ## Roadmap
 
