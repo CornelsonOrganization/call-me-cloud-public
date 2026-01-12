@@ -36,21 +36,66 @@ log_error() {
 # Create plugins directory
 mkdir -p "$PLUGINS_DIR"
 
-# Clone official plugins repository
-# Use subshell for cd to avoid changing working directory
-log_info "Cloning official plugins repository..."
-if [ -d "$OFFICIAL_REPO_DIR" ]; then
-    log_warn "Plugins repository already exists, pulling latest..."
-    if ! (cd "$OFFICIAL_REPO_DIR" && git pull --quiet); then
-        log_error "Failed to update plugins repository"
+# Source verification script for commit hash pinning
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERIFY_SCRIPT="$SCRIPT_DIR/verify-plugins.sh"
+
+# Clone and verify official plugins repository
+# SECURITY: Uses commit hash pinning to prevent supply chain attacks
+log_info "Setting up official plugins repository with verification..."
+
+# Check if verification should be skipped (development only - NOT in CI)
+if [ "${SKIP_PLUGIN_VERIFICATION:-}" = "true" ]; then
+    # SECURITY: Block this bypass in GitHub Actions to prevent abuse
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        log_error "SECURITY: SKIP_PLUGIN_VERIFICATION cannot be used in GitHub Actions"
+        log_error "This bypass is only allowed for local development"
         exit 1
+    fi
+
+    log_warn "SECURITY WARNING: Plugin verification is DISABLED"
+    log_warn "This should only be used for development/testing"
+
+    if [ -d "$OFFICIAL_REPO_DIR" ]; then
+        log_warn "Using existing unverified repository"
+    else
+        if ! git clone --depth 1 --quiet "$OFFICIAL_REPO" "$OFFICIAL_REPO_DIR"; then
+            log_error "Failed to clone official plugins repository from $OFFICIAL_REPO"
+            exit 1
+        fi
+        log_warn "Cloned repository WITHOUT verification"
+    fi
+elif [ -f "$VERIFY_SCRIPT" ]; then
+    # Source verification functions
+    source "$VERIFY_SCRIPT"
+
+    if [ -d "$OFFICIAL_REPO_DIR" ]; then
+        log_info "Plugins repository exists, verifying integrity..."
+        if ! verify_repository "$OFFICIAL_REPO_DIR"; then
+            log_warn "Verification failed - re-cloning from pinned commit..."
+            rm -rf "$OFFICIAL_REPO_DIR"
+            if ! clone_and_verify "$OFFICIAL_REPO_DIR"; then
+                log_error "Failed to clone verified plugins repository"
+                exit 1
+            fi
+        fi
+        log_info "Plugin repository verified successfully"
+    else
+        if ! clone_and_verify "$OFFICIAL_REPO_DIR"; then
+            log_error "Failed to clone and verify official plugins repository"
+            exit 1
+        fi
+        log_info "Cloned and verified official plugins repository"
     fi
 else
-    if ! git clone --depth 1 --quiet "$OFFICIAL_REPO" "$OFFICIAL_REPO_DIR"; then
-        log_error "Failed to clone official plugins repository from $OFFICIAL_REPO"
-        exit 1
-    fi
-    log_info "Cloned official plugins repository"
+    # SECURITY: Fail closed - missing verification script is a security concern
+    log_error "Verification script not found: $VERIFY_SCRIPT"
+    log_error "Cannot proceed without plugin verification (security requirement)"
+    log_error ""
+    log_error "To fix:"
+    log_error "  1. Ensure .github/scripts/verify-plugins.sh exists"
+    log_error "  2. Or set SKIP_PLUGIN_VERIFICATION=true for local development only"
+    exit 1
 fi
 
 # Tier 1: Core default plugins (always loaded)
