@@ -237,6 +237,8 @@ jobs:
 
             # Validate skills configuration if validator exists
             if [ -f ".github/scripts/validate-skills.sh" ]; then
+              # Install jsonschema for validation (fast, ~2s)
+              pip install --quiet jsonschema 2>/dev/null || true
               if ! bash .github/scripts/validate-skills.sh "$SKILLS_FILE"; then
                 echo "::error::Skills validation failed for $SKILLS_FILE"
                 exit 1
