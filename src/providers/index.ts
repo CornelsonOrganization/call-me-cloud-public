@@ -61,7 +61,7 @@ export function loadProviderConfig(): ProviderConfig {
     phoneNumber: process.env.CALLME_PHONE_NUMBER || '',
     telnyxPublicKey: process.env.CALLME_TELNYX_PUBLIC_KEY,
     openaiApiKey: process.env.CALLME_OPENAI_API_KEY || '',
-    ttsVoice: process.env.CALLME_TTS_VOICE || 'onyx',
+    ttsVoice: process.env.CALLME_TTS_VOICE || 'ballad',
     sttModel: process.env.CALLME_STT_MODEL || 'gpt-4o-transcribe',
     sttSilenceDurationMs,
     whatsappEnabled: process.env.CALLME_WHATSAPP_ENABLED === 'true',

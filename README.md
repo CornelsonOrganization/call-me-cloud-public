@@ -494,7 +494,7 @@ The workflow automatically:
 | `CALLME_PHONE_NUMBER` | Yes | - | Your Twilio phone number (format: +1XXXYYYZZZZ) |
 | `CALLME_USER_PHONE_NUMBER` | Yes | - | Your personal phone number to receive calls (format: +1XXXYYYZZZZ) |
 | `CALLME_OPENAI_API_KEY` | Yes | - | OpenAI API key for TTS/STT (Realtime API) |
-| `CALLME_TTS_VOICE` | No | `onyx` | TTS voice (see [Voices](#available-voices)) |
+| `CALLME_TTS_VOICE` | No | `ballad` | TTS voice (see [Voices](#available-voices)) |
 | `OPENAI_API_BASE_URL` | No | - | Regional OpenAI endpoint (e.g., `us.api.openai.com`) |
 
 > **Generating `CALLME_API_KEY`:** This is a secret you create yourself to secure communication between your MCP client and cloud server. Generate a secure random string (32+ characters) using:
