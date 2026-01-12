@@ -179,6 +179,106 @@ Real-world scenarios where Call-Me Cloud shines. Use these storyboards to unders
 
 ---
 
+## 11. The "Power Platform Pipeline"
+
+**Persona:** Morgan, a Power Platform developer
+**Scenario:** Morgan's team uses CI/CD for Power Platform solutions. They want to review and deploy changes while commuting.
+
+**Flow:**
+1. Before leaving: "Claude, I need to add a new flow for order notifications. Call me in 10 minutes."
+2. [10 minutes later, in the car]
+3. `initiate_call`: "Hey Morgan, I looked at the MainSolution. I can add the order notification flow to the existing OrderProcessing flow, or create a standalone flow. Which approach?"
+4. Morgan: "Create a standalone. We want to be able to disable it independently."
+5. `continue_call`: "Makes sense. Should it trigger on order creation, status change, or both?"
+6. Morgan: "Both. And email the sales team."
+7. `continue_call`: "Got it. I'll create OrderNotificationFlow with two triggers. Before I commit, should I run pac solution check?"
+8. Morgan: "Yes, and export to releases/ when done."
+9. `end_call`: "Solution checked, exported. Pushed to feat/order-notifications. Want me to create a PR?"
+
+**Value:** Complex platform work, completely hands-free.
+
+---
+
+## 12. The "Meeting-to-Spec Converter"
+
+**Persona:** Sam, a tech lead
+**Scenario:** Sam has a folder of meeting transcripts and wants to turn yesterday's API design discussion into a formal spec while commuting.
+
+**Flow:**
+1. Before commute: "Claude, review the 2025-01-10 API design meeting and call me in 5 minutes to discuss specs."
+2. [5 minutes later]
+3. `initiate_call`: "Hey Sam, I read the transcript. The team decided on GraphQL with Apollo, but I noticed three open questions. First: what's the expected cache TTL for user profiles?"
+4. Sam: "30 minutes for profiles, 5 minutes for activity feeds."
+5. `continue_call`: "Got it. Second: the transcript mentions 'pagination' but doesn't specify cursor vs offset. Which approach?"
+6. Sam: "Cursor-based. We'll have real-time updates."
+7. `continue_call`: "Perfect. Third: rate limiting. The transcript says 'reasonable limits' but nothing specific."
+8. Sam: "100 requests per minute per user, 1000 for authenticated services."
+9. `continue_call`: "Great. I'll draft the spec now with these clarifications. Should I also create an ADR for the GraphQL decision?"
+10. Sam: "Yes, put it in decisions/"
+11. `end_call`: "Done. Spec is at specs/api-graphql.md and ADR at decisions/001-graphql.md. Anything else?"
+
+**Value:** Ambient context capture. Decisions made in the car, documented in the repo.
+
+---
+
+## 13. The "Sprint Planning Companion"
+
+**Persona:** Avery, a product manager
+**Scenario:** Avery wants to discuss sprint priorities with Claude during their morning coffee before the standup.
+
+**Flow:**
+1. Avery triggers call from GitHub mobile app
+2. `initiate_call`: "Good morning Avery. I looked at the backlog. You have 12 items, but based on velocity, I'd suggest focusing on 4. Want to hear my recommendations?"
+3. Avery: "Yes, go ahead."
+4. `continue_call`: "First priority: the auth refactor. It's blocking three other tickets. Second: the payment fix—two customers escalated yesterday..."
+5. [Discussion continues for 5 minutes]
+6. `end_call`: "I've updated the sprint board and moved the four prioritized items to 'Sprint 23'. I also added labels. Anything to adjust before standup?"
+
+**Value:** Prepared for standup before opening the laptop.
+
+---
+
+## 14. The "Cross-Repo Coordinator"
+
+**Persona:** Blake, maintaining multiple microservices
+**Scenario:** A breaking API change in service-a requires updates to service-b and service-c.
+
+**Flow:**
+1. Blake: "Claude, the auth endpoint in service-a changed. Find all consumers and call me."
+2. Claude searches across repos
+3. `initiate_call`: "Hey Blake, found 3 places that call the old auth endpoint: service-b's UserController, service-c's AuthMiddleware, and the mobile-api's LoginHandler."
+4. Blake: "Can you fix them all?"
+5. `continue_call`: "I can fix service-b and service-c directly. The mobile-api is in a separate org—I'll prepare a PR description you can share with that team."
+6. Blake: "Do it."
+7. `end_call`: "Done. Created PRs in service-b and service-c. Here's the description for the mobile team: [reads it aloud]. I'll also paste it in the PR comments. Anything else?"
+
+**Value:** Coordinate changes across repos without opening multiple tabs.
+
+---
+
+## 15. The "Release Captain"
+
+**Persona:** Casey, responsible for weekly releases
+**Scenario:** It's release day. Casey wants to review the release notes and get final approval before deploying.
+
+**Flow:**
+1. Casey triggers from GitHub Actions: "Prepare release notes and call me"
+2. `initiate_call`: "Hey Casey, release v2.3.0 is ready. 14 commits since last release. Three features, two bug fixes, and some housekeeping. Want the highlights?"
+3. Casey: "Give me the customer-facing changes."
+4. `continue_call`: "Feature 1: Dark mode. Users asked for this in feedback. Feature 2: Faster search, about 40% improvement. Bug fixes: the login loop is gone, and CSV exports handle unicode now."
+5. Casey: "Any breaking changes?"
+6. `continue_call`: "One: the `/api/v1/users` endpoint now requires a `limit` parameter. We have migration docs ready."
+7. Casey: "Deploy to staging first. If it looks good in 30 minutes, deploy to prod."
+8. `end_call`: "Deploying to staging now. I'll call you in 30 minutes with the results."
+9. [30 minutes later]
+10. `initiate_call`: "Staging looks good. All smoke tests pass. Ready for production?"
+11. Casey: "Ship it."
+12. `end_call`: "Deployed to production. Release notes are live. Talk soon!"
+
+**Value:** Release management without touching a keyboard.
+
+---
+
 ## Summary
 
 | Use Case | Key Value |
@@ -193,3 +293,8 @@ Real-world scenarios where Call-Me Cloud shines. Use these storyboards to unders
 | Pair Programming Mentor | Teaching through dialogue |
 | Accessibility-First | Voice-first coding for RSI |
 | Family-Friendly | Quiet productivity without keyboard |
+| Power Platform Pipeline | Low-code CI/CD, hands-free |
+| Meeting-to-Spec Converter | Ambient context capture |
+| Sprint Planning Companion | Prepared before standup |
+| Cross-Repo Coordinator | Multi-repo changes without tabs |
+| Release Captain | Releases without a keyboard |

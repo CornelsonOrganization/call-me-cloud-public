@@ -26,6 +26,16 @@ on:
           - sonnet
           - opus
           - haiku
+      base_prompt:
+        description: 'Base prompt persona (see .github/base-prompts/)'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - power-platform
+          - meeting-notes
+          - code-review
       prompt:
         description: 'What should Claude discuss/work on?'
         required: false
@@ -182,6 +192,36 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
+      - name: Load base prompt
+        id: base_prompt
+        env:
+          BASE_PROMPT_INPUT: ${{ inputs.base_prompt }}
+        run: |
+          # Sanitize input: only allow alphanumeric and hyphens
+          SAFE_NAME=$(echo "$BASE_PROMPT_INPUT" | tr -cd 'a-zA-Z0-9-')
+          SAFE_NAME=${SAFE_NAME:-default}
+
+          PROMPT_FILE=".github/base-prompts/${SAFE_NAME}.md"
+
+          if [ -f "$PROMPT_FILE" ]; then
+            echo "✓ Loading base prompt: $SAFE_NAME"
+            # Extract content after YAML frontmatter (skip lines between --- markers)
+            CONTENT=$(awk '/^---$/{if(seen){p=1;next}else{seen=1;next}} p' "$PROMPT_FILE")
+            if [ -z "$CONTENT" ]; then
+              echo "::warning::Base prompt file exists but content is empty after frontmatter: $PROMPT_FILE"
+            fi
+            {
+              echo "content<<BASE_PROMPT_EOF"
+              echo "$CONTENT"
+              echo "BASE_PROMPT_EOF"
+            } >> $GITHUB_OUTPUT
+            echo "name=$SAFE_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Base prompt file not found: $PROMPT_FILE (using default behavior)"
+            echo "content=" >> $GITHUB_OUTPUT
+            echo "name=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure MCP for call-me-cloud
         env:
           CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
@@ -219,6 +259,8 @@ jobs:
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
           RECENT_COMMITS: ${{ steps.context.outputs.commits }}
           EVENT_NAME: ${{ github.event_name }}
+          BASE_PROMPT_CONTENT: ${{ steps.base_prompt.outputs.content }}
+          BASE_PROMPT_NAME: ${{ steps.base_prompt.outputs.name }}
         run: |
           if [ "$EVENT_NAME" = "schedule" ] || [ -z "$USER_PROMPT" ]; then
             # Scheduled or no prompt provided: daily standup mode
@@ -230,6 +272,17 @@ jobs:
 
           {
             echo "content<<PROMPT_EOF"
+
+            # Include base prompt if provided
+            if [ -n "$BASE_PROMPT_CONTENT" ]; then
+              echo "# Base Persona: ${BASE_PROMPT_NAME}"
+              echo ""
+              echo "$BASE_PROMPT_CONTENT"
+              echo ""
+              echo "---"
+              echo ""
+            fi
+
             cat << EOF
           You are running in GitHub Actions for ${REPO_NAME}.
 
