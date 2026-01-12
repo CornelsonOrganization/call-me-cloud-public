@@ -66,13 +66,10 @@ validate_schema() {
         return 1
     fi
 
-    # Convert YAML to JSON
-    local json_content
-    json_content=$(yq -o json "$skills_file")
-
-    # SECURITY: Pass JSON through stdin to avoid shell injection via heredoc
-    # The json_content could contain malicious characters if YAML parsing doesn't sanitize
-    echo "$json_content" | SCHEMA_FILE="$SCHEMA_FILE" python3 << 'EOF'
+    # Convert YAML to JSON and pipe directly to Python
+    # NOTE: Cannot use heredoc with pipe - heredoc takes over stdin
+    # Use -c flag with properly escaped Python code instead
+    yq -o json "$skills_file" | SCHEMA_FILE="$SCHEMA_FILE" python3 -c '
 import sys
 import os
 import json
@@ -80,13 +77,10 @@ import json
 try:
     from jsonschema import validate, ValidationError, Draft7Validator
 except ImportError:
-    # SECURITY: jsonschema should be pre-installed in CI environment
-    # Fail if not available rather than installing unverified packages
     print("[VALIDATE] ERROR: jsonschema not installed", file=sys.stderr)
     print("[VALIDATE] Install with: pip install jsonschema", file=sys.stderr)
     sys.exit(1)
 
-# Load schema from environment variable path
 schema_file = os.environ.get("SCHEMA_FILE")
 if not schema_file:
     print("[VALIDATE] ERROR: SCHEMA_FILE not set", file=sys.stderr)
@@ -95,23 +89,21 @@ if not schema_file:
 with open(schema_file) as f:
     schema = json.load(f)
 
-# Parse data from stdin (safe - no shell interpolation)
 data = json.load(sys.stdin)
 
-# Validate
 validator = Draft7Validator(schema)
 errors = list(validator.iter_errors(data))
 
 if errors:
     print("[VALIDATE] Schema validation failed:", file=sys.stderr)
-    for error in errors[:5]:  # Show first 5 errors
+    for error in errors[:5]:
         path = " -> ".join(str(p) for p in error.absolute_path) or "(root)"
         print(f"  - Path: {path}", file=sys.stderr)
         print(f"    Error: {error.message}", file=sys.stderr)
     sys.exit(1)
 
 print("[VALIDATE] Schema validation passed", file=sys.stderr)
-EOF
+'
 }
 
 # Validate system_deps against allowlist
@@ -120,7 +112,7 @@ validate_system_deps() {
 
     # Extract system_deps
     local deps
-    deps=$(yq -r '.skills.system_deps[]? // empty' "$skills_file" 2>/dev/null || echo "")
+    deps=$(yq -r '.skills.system_deps[]?' "$skills_file" 2>/dev/null || echo "")
 
     if [ -z "$deps" ]; then
         log_info "No system dependencies to validate"
@@ -175,7 +167,7 @@ validate_python_deps() {
     local skills_file="$1"
 
     local deps
-    deps=$(yq -r '.skills.python_deps[]? // empty' "$skills_file" 2>/dev/null || echo "")
+    deps=$(yq -r '.skills.python_deps[]?' "$skills_file" 2>/dev/null || echo "")
 
     if [ -z "$deps" ]; then
         log_info "No Python dependencies to validate"
@@ -191,9 +183,10 @@ validate_python_deps() {
         [ -z "$dep" ] && continue
 
         # SECURITY: Check for dangerous characters (shell injection prevention)
-        # Includes: ; | & $ ` \ ' " ( ) ! < > newlines and control chars
+        # Reject: ; | & $ ` \ ' " ( ) and control chars
+        # Allow: < > ! = ~ as they are valid in pip version specifiers
         # Note: Using grep for reliable special char matching (bash regex has escaping issues)
-        if echo "$dep" | grep -qE '[;|&$`\\'"'"'"()!<>]' || [[ "$dep" =~ [[:cntrl:]] ]]; then
+        if echo "$dep" | grep -qE '[;|&$`\\'"'"'"()]' || [[ "$dep" =~ [[:cntrl:]] ]]; then
             invalid+=("$dep (contains dangerous characters)")
             continue
         fi
