@@ -46,6 +46,7 @@ interface CallState {
   lastActivityAt: number;           // Timestamp for inactivity timeout
   inactivityTimer?: NodeJS.Timeout; // Event-driven timeout (cleared on activity)
   whatsappSessionTimer?: NodeJS.Timeout; // 24-hour window timer
+  hangupCheckInterval?: NodeJS.Timeout; // Interval for waitForHangup (cleaned up on session close)
 }
 
 export interface ServerConfig {
@@ -262,6 +263,10 @@ class SessionManager {
     if (state.whatsappSessionTimer) {
       clearTimeout(state.whatsappSessionTimer);
       state.whatsappSessionTimer = undefined;
+    }
+    if (state.hangupCheckInterval) {
+      clearInterval(state.hangupCheckInterval);
+      state.hangupCheckInterval = undefined;
     }
 
     // Remove secure phone mappings
@@ -1704,20 +1709,27 @@ export class CallManager {
   /**
    * Returns a promise that rejects when the call is hung up.
    * Used to race against transcript waiting.
+   *
+   * The interval is stored on CallState and cleaned up by removeSession()
+   * to prevent memory leaks if the race resolves at an edge case timing.
    */
   private waitForHangup(state: CallState): Promise<never> {
     return new Promise((_, reject) => {
+      // Clear any existing interval first (defensive)
+      if (state.hangupCheckInterval) {
+        clearInterval(state.hangupCheckInterval);
+      }
+
       const checkInterval = setInterval(() => {
         if (state.hungUp) {
           clearInterval(checkInterval);
+          state.hangupCheckInterval = undefined;
           reject(new Error('Call was hung up by user'));
         }
       }, 100);  // Check every 100ms
 
-      // Clean up interval after transcript timeout to avoid memory leaks
-      setTimeout(() => {
-        clearInterval(checkInterval);
-      }, this.config.transcriptTimeoutMs + 1000);
+      // Store interval on state so removeSession() can clean it up
+      state.hangupCheckInterval = checkInterval;
     });
   }
 
