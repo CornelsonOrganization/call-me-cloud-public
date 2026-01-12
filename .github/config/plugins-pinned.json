@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/anthropics/claude-plugins-official.git",
+  "pinned_commit": "0000000000000000000000000000000000000000",
+  "pinned_at": "2026-01-12T00:00:00Z",
+  "pinned_by": "security-setup",
+  "verification_method": "commit_hash",
+  "notes": "PLACEHOLDER: Run .github/scripts/verify-plugins.sh update-pin to set actual commit hash from Anthropic's official repo"
+}

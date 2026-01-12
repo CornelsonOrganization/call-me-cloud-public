@@ -1,0 +1,26 @@
+# Allowlist of approved system packages for skills
+# One package per line
+# Lines starting with # are comments
+# Packages must match exactly (case-sensitive)
+#
+# SECURITY: Only packages listed here can be installed via skills.yml
+# To add a new package, submit a PR with justification
+
+# Document processing - LibreOffice
+libreoffice-writer
+libreoffice-calc
+libreoffice-impress
+libreoffice-common
+
+# PDF utilities
+poppler-utils
+ghostscript
+
+# Document conversion
+pandoc
+
+# Image processing
+imagemagick
+
+# Archive utilities
+unzip

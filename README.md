@@ -288,6 +288,8 @@ Select a persona for Claude using the `base_prompt` input. Base prompts define C
 | Preset | Description | Best For |
 |--------|-------------|----------|
 | `default` | Standard Claude Code behavior | General development |
+| `office-mode` | Office document specialist | Creating docs, slides, spreadsheets |
+| `crowe-studio` | Crowe Studio branded documents | Documents following 9 Formatting Basics |
 | `power-platform` | Power Platform & PAC CLI expert | Power Apps/Automate work |
 | `meeting-notes` | Design spec writer | Turning discussions into specs |
 | `code-review` | Thorough reviewer with mentorship focus | PR reviews |
@@ -394,6 +396,91 @@ Convert meeting discussions into formal specifications:
    > "Hey, I read the transcript from yesterday's API design meeting. The main decision was to use GraphQL, but I noticed some open questions about caching. Can you clarify the expected TTL?"
 
 4. **After the call:** Claude commits a formal spec to `specs/auth-flow.md`
+
+### Office Skills Integration
+
+The `office-mode` and `crowe-studio` base prompts enable Claude to create professional documents using Anthropic's official Office skills:
+
+**Supported document types:**
+- **Word Documents (docx)** - PRDs, specs, reports, memos
+- **Excel Spreadsheets (xlsx)** - Data analysis, budgets, tracking
+- **PowerPoint Presentations (pptx)** - Decks, pitches, reviews
+- **PDF Documents (pdf)** - Formal reports, contracts
+
+**How it works:**
+1. Select `office-mode` or `crowe-studio` as your base prompt
+2. The workflow automatically loads required Python dependencies
+3. Claude can create and edit Office documents during the call
+4. Documents are saved to your repository and committed
+
+**Usage:**
+```bash
+# Create a presentation during a phone call
+gh workflow run call.yml \
+  -f base_prompt="office-mode" \
+  -f prompt="Create a quarterly review presentation for Q4 results"
+
+# Create Crowe-branded documents
+gh workflow run call.yml \
+  -f base_prompt="crowe-studio" \
+  -f prompt="Create a PRD for the new authentication feature"
+```
+
+### Example: Crowe Studio Branded Documents
+
+For teams following the Crowe Studio 9 Formatting Basics:
+
+1. **Use the `crowe-studio` base prompt:**
+   ```bash
+   gh workflow run call.yml \
+     -f base_prompt="crowe-studio" \
+     -f prompt="Create a project status deck for stakeholders"
+   ```
+
+2. **Claude follows the 9 Formatting Basics:**
+   - Arial font family (9pt minimum)
+   - Theme colors only (#D38938 orange, #0F2D5E blue, etc.)
+   - Orange square bullets
+   - Flat design (no shadows, bevels, or 3D effects)
+   - Proper table formatting with orange headers
+
+3. **Theme configuration available at:** `templates/themes/crowe-studio.json`
+
+4. **Color palette:**
+   | Color | Hex | Usage |
+   |-------|-----|-------|
+   | Studio Orange | #D38938 | Primary, highlights |
+   | Crowe Blue | #0F2D5E | Headers, backgrounds |
+   | Teal | #48A188 | Success indicators |
+   | Yellow | #F3BC44 | Warnings |
+   | Red | #B02418 | Errors |
+   | Grey | #CCCCCC | Neutral |
+
+### Skills Configuration
+
+Base prompts can declare required skills in `.github/prompt-skills/{prompt-name}/skills.yml`:
+
+```yaml
+# .github/prompt-skills/office-mode/skills.yml
+skills:
+  plugins:
+    - name: anthropics/skills
+      skills:
+        - docx
+        - xlsx
+        - pptx
+        - pdf
+
+  python_deps:
+    - python-docx>=0.8.11
+    - openpyxl>=3.1.0
+    - python-pptx>=0.6.21
+```
+
+The workflow automatically:
+- Validates the skills configuration
+- Installs Python dependencies
+- Enables the Skill tool for document generation
 
 ## Configuration
 

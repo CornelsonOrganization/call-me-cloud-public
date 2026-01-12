@@ -1,0 +1,42 @@
+# Skills configuration for office-mode base prompt
+# These skills are loaded when office-mode is selected in the workflow
+
+skills:
+  # Official Anthropic Office skills (via plugin marketplace)
+  # These are the same production-grade skills used in claude.ai
+  plugins:
+    - name: anthropics/skills
+      description: Official Anthropic Agent Skills for document generation
+      skills:
+        - docx   # Word documents
+        - xlsx   # Excel spreadsheets
+        - pptx   # PowerPoint presentations
+        - pdf    # PDF documents
+
+  # Project-level custom skills (loaded from .claude/skills/)
+  # Uncomment when company-templates skill is created
+  # project:
+  #   - company-templates
+
+  # Optional system dependencies for advanced features
+  # Adds ~2-3 min to workflow startup time
+  # Uncomment if you need DOC→DOCX conversion, OCR, etc.
+  # system_deps:
+  #   - libreoffice-writer   # DOC/DOCX conversion
+  #   - poppler-utils        # PDF utilities (pdftoppm, pdftotext)
+  #   - pandoc               # Format conversion
+
+  # Python dependencies for custom scripts
+  # These are fast to install (~15 sec)
+  python_deps:
+    - python-docx>=0.8.11    # Word document creation
+    - openpyxl>=3.1.0        # Excel spreadsheet creation
+    - python-pptx>=0.6.21    # PowerPoint creation
+    - pypdf>=3.0.0           # PDF reading/manipulation
+    - pdfplumber>=0.9.0      # PDF text extraction
+
+# Workflow integration notes:
+# 1. The call.yml workflow should parse this file when base_prompt=office-mode
+# 2. Plugins listed here are added to the plugin marketplace
+# 3. Python deps are installed via pip before Claude runs
+# 4. System deps (if uncommented) are installed via apt-get
