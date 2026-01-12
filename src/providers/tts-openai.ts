@@ -13,7 +13,7 @@ import type { TTSProvider, TTSConfig } from './types.js';
 export class OpenAITTSProvider implements TTSProvider {
   readonly name = 'openai';
   private client: OpenAI | null = null;
-  private voice: string = 'ballad';
+  private voice: string = 'nova';
   private model: string = 'tts-1';
 
   initialize(config: TTSConfig): void {
@@ -35,7 +35,7 @@ export class OpenAITTSProvider implements TTSProvider {
     }
 
     this.client = new OpenAI({ apiKey: config.apiKey, baseURL });
-    this.voice = config.voice || 'ballad';
+    this.voice = config.voice || 'nova';
     this.model = config.model || 'tts-1';
 
     console.error(`TTS provider: OpenAI (${this.model}, voice: ${this.voice}${baseURL ? `, endpoint: ${baseURL}` : ''})`);
