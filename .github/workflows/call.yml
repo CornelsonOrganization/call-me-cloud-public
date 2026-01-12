@@ -281,6 +281,36 @@ jobs:
           pip install --quiet $PYTHON_DEPS
           echo "✓ Python dependencies installed"
 
+      - name: Install office document skills
+        if: steps.prompt_skills.outputs.has_office_skills == 'true'
+        run: |
+          echo "📄 Installing office document skills..."
+
+          # Create .claude/skills directory
+          mkdir -p .claude/skills
+
+          # Clone the claude-office-skills repository (community package)
+          SKILLS_REPO="https://github.com/tfriedel/claude-office-skills.git"
+          SKILLS_DIR="/tmp/claude-office-skills"
+
+          if git clone --depth 1 --quiet "$SKILLS_REPO" "$SKILLS_DIR" 2>/dev/null; then
+            # Copy office skills to .claude/skills/
+            for skill in docx xlsx pptx pdf; do
+              if [ -d "$SKILLS_DIR/public/$skill" ]; then
+                cp -r "$SKILLS_DIR/public/$skill" ".claude/skills/"
+                echo "✓ Installed $skill skill"
+              fi
+            done
+            rm -rf "$SKILLS_DIR"
+            echo "✓ Office document skills installed"
+          else
+            echo "::warning::Could not clone office skills repository, continuing without document skills"
+          fi
+
+          # List installed skills
+          echo "Installed skills:"
+          ls -la .claude/skills/ 2>/dev/null || echo "No skills directory"
+
       - name: Configure MCP for call-me-cloud
         env:
           CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
