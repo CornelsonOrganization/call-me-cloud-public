@@ -192,7 +192,8 @@ validate_python_deps() {
 
         # SECURITY: Check for dangerous characters (shell injection prevention)
         # Includes: ; | & $ ` \ ' " ( ) ! < > newlines and control chars
-        if [[ "$dep" =~ [';|&$`\\'\"()!<>] ]] || [[ "$dep" =~ [[:cntrl:]] ]]; then
+        # Note: Using grep for reliable special char matching (bash regex has escaping issues)
+        if echo "$dep" | grep -qE '[;|&$`\\'"'"'"()!<>]' || [[ "$dep" =~ [[:cntrl:]] ]]; then
             invalid+=("$dep (contains dangerous characters)")
             continue
         fi
