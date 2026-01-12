@@ -49,7 +49,19 @@ export function validateTwilioSignature(
     .update(dataToSign)
     .digest('base64');
 
-  const valid = signature === expectedSignature;
+  // Use timing-safe comparison to prevent timing attacks
+  // Pad to equal length to avoid leaking length information
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+  const receivedBuffer = Buffer.from(signature, 'utf8');
+  const maxLength = Math.max(expectedBuffer.length, receivedBuffer.length);
+  const paddedExpected = Buffer.alloc(maxLength);
+  const paddedReceived = Buffer.alloc(maxLength);
+  expectedBuffer.copy(paddedExpected);
+  receivedBuffer.copy(paddedReceived);
+
+  const contentsMatch = timingSafeEqual(paddedExpected, paddedReceived);
+  const lengthsMatch = expectedBuffer.length === receivedBuffer.length;
+  const valid = contentsMatch && lengthsMatch;
 
   if (!valid) {
     console.error('[Security] Twilio signature mismatch');
