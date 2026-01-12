@@ -64,7 +64,7 @@ export function loadProviderConfig(): ProviderConfig {
     telnyxPublicKey: process.env.CALLME_TELNYX_PUBLIC_KEY,
     openaiApiKey: process.env.CALLME_OPENAI_API_KEY || '',
     ttsModel: process.env.CALLME_TTS_MODEL || 'gpt-4o-mini-tts',
-    ttsVoice: process.env.CALLME_TTS_VOICE || 'ballad',
+    ttsVoice: process.env.CALLME_TTS_VOICE || 'coral',
     ttsInstructions: process.env.CALLME_TTS_INSTRUCTIONS,
     sttModel: process.env.CALLME_STT_MODEL || 'gpt-4o-transcribe',
     sttSilenceDurationMs,

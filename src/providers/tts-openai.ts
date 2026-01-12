@@ -16,7 +16,7 @@ import type { TTSProvider, TTSConfig } from './types.js';
 export class OpenAITTSProvider implements TTSProvider {
   readonly name = 'openai';
   private client: OpenAI | null = null;
-  private voice: string = 'ballad';
+  private voice: string = 'coral';
   private model: string = 'gpt-4o-mini-tts';
   private instructions?: string;
 
@@ -39,7 +39,7 @@ export class OpenAITTSProvider implements TTSProvider {
     }
 
     this.client = new OpenAI({ apiKey: config.apiKey, baseURL });
-    this.voice = config.voice || 'ballad';
+    this.voice = config.voice || 'coral';
     this.model = config.model || 'gpt-4o-mini-tts';
     this.instructions = config.instructions;
 
