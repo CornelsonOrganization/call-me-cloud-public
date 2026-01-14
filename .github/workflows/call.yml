@@ -2,7 +2,11 @@
 #
 # Triggers:
 #   - Manual: gh workflow run call.yml --repo OWNER/REPO -f prompt="..." -f delay_minutes=5
-#   - Scheduled: Daily at 9 AM UTC on weekdays
+#   - Scheduled: 7 AM CT (Tue-Thu) and 5:30 PM CT (Mon-Thu)
+#
+# Note: GitHub Actions cron uses UTC. These schedules target CDT (UTC-5) since
+# it's in effect ~8 months/year (Mar-Nov). During CST (Nov-Mar), calls will be
+# 1 hour earlier (6 AM and 4:30 PM local time).
 #
 # Secrets required:
 #   - ANTHROPIC_API_KEY
@@ -13,7 +17,8 @@ name: Call
 
 on:
   schedule:
-    - cron: '0 9 * * 1-5'  # 9 AM UTC, Monday-Friday
+    - cron: '0 12 * * 2-4'   # 7 AM CDT / 6 AM CST, Tuesday-Thursday (morning standup)
+    - cron: '30 22 * * 1-4'  # 5:30 PM CDT / 4:30 PM CST, Monday-Thursday (afternoon check-in)
 
   workflow_dispatch:
     inputs:
