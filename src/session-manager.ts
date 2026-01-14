@@ -45,6 +45,7 @@ export interface CallState {
   inactivityTimer?: NodeJS.Timeout; // Event-driven timeout (cleared on activity)
   whatsappSessionTimer?: NodeJS.Timeout; // 24-hour window timer
   hangupCheckInterval?: NodeJS.Timeout; // Interval for waitForHangup (cleaned up on session close)
+  disconnectGraceTimer?: NodeJS.Timeout; // Grace period timer before marking as truly disconnected
 }
 
 export interface ServerConfig {
@@ -253,6 +254,10 @@ export class SessionManager {
     if (state.hangupCheckInterval) {
       clearInterval(state.hangupCheckInterval);
       state.hangupCheckInterval = undefined;
+    }
+    if (state.disconnectGraceTimer) {
+      clearTimeout(state.disconnectGraceTimer);
+      state.disconnectGraceTimer = undefined;
     }
 
     // Remove secure phone mappings

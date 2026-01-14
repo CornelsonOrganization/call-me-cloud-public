@@ -196,15 +196,31 @@ export class CallManager {
               if (msgState) {
                 msgState.streamSid = msg.streamSid;
                 console.error(`[${validatedCallId}] Captured streamSid: ${msg.streamSid}`);
+                // Cancel any pending disconnect grace timer (connection re-established)
+                if (msgState.disconnectGraceTimer) {
+                  clearTimeout(msgState.disconnectGraceTimer);
+                  msgState.disconnectGraceTimer = undefined;
+                  console.error(`[${validatedCallId}] Cancelled disconnect grace timer (stream restarted)`);
+                }
               }
             }
           }
 
           if (msg.event === 'stop' && validatedCallId) {
             const msgState = this.activeCalls.get(validatedCallId);
-            if (msgState) {
-              console.error(`[${validatedCallId}] Stream stopped`);
-              msgState.hungUp = true;
+            if (msgState && !msgState.hungUp) {
+              console.error(`[${validatedCallId}] Stream stop received, starting 2s grace period`);
+              // Clear any existing grace timer
+              if (msgState.disconnectGraceTimer) {
+                clearTimeout(msgState.disconnectGraceTimer);
+              }
+              // Start grace period - only mark as hung up if still disconnected after 2s
+              msgState.disconnectGraceTimer = setTimeout(() => {
+                if (msgState && !msgState.hungUp) {
+                  console.error(`[${validatedCallId}] Stream stopped (confirmed after grace period)`);
+                  msgState.hungUp = true;
+                }
+              }, 2000);
             }
           }
         } catch {
@@ -318,12 +334,28 @@ export class CallManager {
             if (msg.event === 'start' && msg.streamSid && msgState) {
               msgState.streamSid = msg.streamSid;
               console.error(`[${callId}] Captured streamSid: ${msg.streamSid}`);
+              // Cancel any pending disconnect grace timer (connection re-established)
+              if (msgState.disconnectGraceTimer) {
+                clearTimeout(msgState.disconnectGraceTimer);
+                msgState.disconnectGraceTimer = undefined;
+                console.error(`[${callId}] Cancelled disconnect grace timer (stream restarted)`);
+              }
             }
 
             // Handle "stop" event when call ends
-            if (msg.event === 'stop' && msgState) {
-              console.error(`[${callId}] Stream stopped`);
-              msgState.hungUp = true;
+            if (msg.event === 'stop' && msgState && !msgState.hungUp) {
+              console.error(`[${callId}] Stream stop received, starting 2s grace period`);
+              // Clear any existing grace timer
+              if (msgState.disconnectGraceTimer) {
+                clearTimeout(msgState.disconnectGraceTimer);
+              }
+              // Start grace period - only mark as hung up if still disconnected after 2s
+              msgState.disconnectGraceTimer = setTimeout(() => {
+                if (msgState && !msgState.hungUp) {
+                  console.error(`[${callId}] Stream stopped (confirmed after grace period)`);
+                  msgState.hungUp = true;
+                }
+              }, 2000);
             }
           } catch {
             // Ignore malformed JSON messages from provider
@@ -1123,7 +1155,7 @@ export class CallManager {
       // This reduces latency by generating audio while Twilio establishes the stream
       const ttsPromise = this.generateTTSAudio(message);
 
-      await this.waitForConnection(callId, 15000);
+      await this.waitForConnectionWithRetry(callId);
 
       // Send the pre-generated audio and listen for response
       const audioData = await ttsPromise;
@@ -1210,6 +1242,31 @@ export class CallManager {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error('WebSocket connection timeout');
+  }
+
+  private async waitForConnectionWithRetry(callId: string): Promise<void> {
+    const maxRetries = 3;
+    const baseTimeout = 30000;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.waitForConnection(callId, baseTimeout);
+        return;
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Exponential backoff: 1s, 2s, 4s
+        const backoffMs = Math.pow(2, attempt - 1) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+        // Verify call is still active before retrying
+        const state = this.activeCalls.get(callId);
+        if (!state || state.hungUp) {
+          throw new Error('Call ended during connection retry');
+        }
+      }
+    }
   }
 
   /**
