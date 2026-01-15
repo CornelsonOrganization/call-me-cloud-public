@@ -75,11 +75,12 @@ export class TwilioConversationsProvider implements MessagingProvider {
       console.log(`[${this.name}] Created new conversation ${conversationSid} for ${this.hashPhone(whatsappPhone)}`);
 
       return conversationSid;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`[${this.name}] Failed to create conversation:`, error);
 
+      const err = error as { code?: number; message?: string };
       // Map Twilio errors to MessagingError
-      if (error.code === 63015) {
+      if (err.code === 63015) {
         throw new MessagingError(
           MessagingErrorCode.OPT_IN_REQUIRED,
           `User needs to join WhatsApp sandbox by sending 'join ${this.config.whatsappSandboxCode}' to ${this.config.whatsappPhoneNumber}`,
@@ -89,7 +90,7 @@ export class TwilioConversationsProvider implements MessagingProvider {
 
       throw new MessagingError(
         MessagingErrorCode.UNKNOWN_ERROR,
-        `Failed to create conversation: ${error.message}`,
+        `Failed to create conversation: ${err.message ?? 'Unknown error'}`,
         { twilioError: error }
       );
     }
@@ -117,7 +118,8 @@ export class TwilioConversationsProvider implements MessagingProvider {
         return null;
       }
 
-      const data = (await response.json()) as { conversations?: Array<{ conversation_sid: string; conversation_state: string }> }
+      type ConversationData = { conversation_sid: string; conversation_state: string };
+      const data = (await response.json()) as { conversations?: ConversationData[] }
       const conversations = data.conversations || []
 
       // Find an active conversation (not closed/inactive)
@@ -187,11 +189,18 @@ export class TwilioConversationsProvider implements MessagingProvider {
       console.log(`[${this.name}] Sent message ${messageSid} to conversation ${conversationSid}`);
 
       return messageSid;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`[${this.name}] Failed to send message:`, error);
 
+      // Re-throw if already MessagingError
+      if (error instanceof MessagingError) {
+        throw error;
+      }
+
+      const err = error as { code?: number; status?: number; message?: string };
+
       // Handle rate limiting
-      if (error.code === 429 || error.status === 429) {
+      if (err.code === 429 || err.status === 429) {
         throw new MessagingError(
           MessagingErrorCode.RATE_LIMIT_EXCEEDED,
           'Rate limit exceeded',
@@ -200,7 +209,7 @@ export class TwilioConversationsProvider implements MessagingProvider {
       }
 
       // Handle opt-in required
-      if (error.code === 63015) {
+      if (err.code === 63015) {
         throw new MessagingError(
           MessagingErrorCode.OPT_IN_REQUIRED,
           `User needs to join WhatsApp sandbox`,
@@ -208,14 +217,9 @@ export class TwilioConversationsProvider implements MessagingProvider {
         );
       }
 
-      // Re-throw if already MessagingError
-      if (error instanceof MessagingError) {
-        throw error;
-      }
-
       throw new MessagingError(
         MessagingErrorCode.UNKNOWN_ERROR,
-        `Failed to send message: ${error.message}`,
+        `Failed to send message: ${err.message ?? 'Unknown error'}`,
         { twilioError: error }
       );
     }
@@ -225,19 +229,19 @@ export class TwilioConversationsProvider implements MessagingProvider {
    * Check if conversation has active session window
    * For WhatsApp: 24 hours from last user message
    */
-  async hasActiveSession(conversationSid: string): Promise<boolean> {
+  hasActiveSession(conversationSid: string): Promise<boolean> {
     const state = this.conversations.get(conversationSid);
 
     if (!state) {
       // Unknown conversation, assume expired
-      return false;
+      return Promise.resolve(false);
     }
 
     // WhatsApp allows 24 hours from last message
     const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
     const elapsed = Date.now() - state.lastMessageAt;
 
-    return elapsed < SESSION_WINDOW_MS;
+    return Promise.resolve(elapsed < SESSION_WINDOW_MS);
   }
 
   /**
@@ -310,7 +314,7 @@ export class TwilioConversationsProvider implements MessagingProvider {
   private async addParticipant(conversationSid: string, address: string): Promise<void> {
     const url = `https://conversations.twilio.com/v1/Conversations/${conversationSid}/Participants`;
 
-    const params: any = {
+    const params: Record<string, string> = {
       'MessagingBinding.Address': address,
     };
 

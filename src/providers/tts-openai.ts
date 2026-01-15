@@ -84,13 +84,13 @@ export class OpenAITTSProvider implements TTSProvider {
       throw new Error('No response body from OpenAI TTS');
     }
 
-    const reader = body.getReader();
+    const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
     try {
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          yield Buffer.from(value);
+        const result = await reader.read();
+        if (result.done) break;
+        if (result.value) {
+          yield Buffer.from(result.value);
         }
       }
     } finally {

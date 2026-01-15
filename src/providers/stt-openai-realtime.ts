@@ -10,6 +10,14 @@
 import WebSocket from 'ws';
 import type { RealtimeSTTProvider, RealtimeSTTSession, STTConfig } from './types.js';
 
+interface RealtimeEvent {
+  type: string;
+  delta?: string;
+  transcript?: string;
+  error?: unknown;
+  session?: unknown;
+}
+
 export class OpenAIRealtimeSTTProvider implements RealtimeSTTProvider {
   readonly name = 'openai-realtime';
   private apiKey: string | null = null;
@@ -100,7 +108,7 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
 
       this.ws.on('message', (data: Buffer) => {
         try {
-          const event = JSON.parse(data.toString());
+          const event = JSON.parse(data.toString()) as RealtimeEvent;
           this.handleEvent(event);
         } catch (e) {
           console.error('[RealtimeSTT] Failed to parse event:', e);
@@ -113,12 +121,13 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
       });
 
       this.ws.on('close', (code, reason) => {
-        console.error(`[RealtimeSTT] WebSocket closed (code: ${code}, reason: ${reason || 'none'})`);
+        const reasonStr = reason ? reason.toString() : 'none';
+        console.error(`[RealtimeSTT] WebSocket closed (code: ${code}, reason: ${reasonStr})`);
         this.connected = false;
 
         // Attempt reconnection if not intentionally closed
         if (!this.closed) {
-          this.attemptReconnect();
+          void this.attemptReconnect();
         }
       });
 
@@ -161,7 +170,7 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
     }
   }
 
-  private handleEvent(event: any): void {
+  private handleEvent(event: RealtimeEvent): void {
     switch (event.type) {
       case 'transcription_session.created':
       case 'transcription_session.updated':
@@ -176,7 +185,7 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
-        console.error(`[RealtimeSTT] Transcript: ${event.transcript}`);
+        console.error(`[RealtimeSTT] Transcript: ${event.transcript ?? ''}`);
         if (event.transcript) {
           this.onTranscriptCallback?.(event.transcript);
         }
@@ -204,7 +213,7 @@ class OpenAIRealtimeSTTSession implements RealtimeSTTSession {
     }
   }
 
-  private sendEvent(event: any): void {
+  private sendEvent(event: Record<string, unknown>): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(event));
     }

@@ -89,7 +89,7 @@ export class MessagingError extends Error {
   constructor(
     public code: MessagingErrorCode,
     message: string,
-    public details?: any
+    public details?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'MessagingError';

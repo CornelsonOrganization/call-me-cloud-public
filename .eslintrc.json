@@ -31,6 +31,14 @@
       "ignoreTemplateLiterals": true
     }]
   },
+  "overrides": [
+    {
+      "files": ["src/test/**/*.ts"],
+      "rules": {
+        "@typescript-eslint/no-floating-promises": "off"
+      }
+    }
+  ],
   "env": {
     "node": true,
     "es2022": true
