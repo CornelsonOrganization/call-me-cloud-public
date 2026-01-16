@@ -1,7 +1,7 @@
 # Consolidated Call Workflow
 #
 # Triggers:
-#   - Manual: gh workflow run call.yml --repo OWNER/REPO -f prompt="..." -f delay_minutes=5
+#   - Manual: gh workflow run call.yml --repo OWNER/REPO -f prompt="..." -f delay_minutes=5 -f environment=dev
 #   - Scheduled: 7 AM CT (Tue-Thu) and 5:30 PM CT (Mon-Thu)
 #
 # Note: GitHub Actions cron uses UTC. These schedules target CDT (UTC-5) since
@@ -11,7 +11,9 @@
 # Secrets required:
 #   - ANTHROPIC_API_KEY
 #   - CALLME_API_KEY
-#   - CALLME_CLOUD_URL
+#   - CALLME_CLOUD_URL (prod)
+#   - CALLME_CLOUD_URL_STAGING (optional, for staging environment)
+#   - CALLME_CLOUD_URL_DEV (optional, for dev environment)
 
 name: Call
 
@@ -22,6 +24,15 @@ on:
 
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Target environment'
+        required: false
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - staging
+          - dev
       model:
         description: 'Claude model to use'
         required: false
@@ -79,20 +90,56 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Verify cloud server is reachable
+      - name: Resolve environment URL
+        id: env_url
         env:
-          CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
+          ENV_INPUT: ${{ inputs.environment }}
+          CALLME_CLOUD_URL_PROD: ${{ secrets.CALLME_CLOUD_URL }}
+          CALLME_CLOUD_URL_STAGING: ${{ secrets.CALLME_CLOUD_URL_STAGING }}
+          CALLME_CLOUD_URL_DEV: ${{ secrets.CALLME_CLOUD_URL_DEV }}
         run: |
-          if [ -z "$CALLME_CLOUD_URL" ]; then
-            echo "::error::CALLME_CLOUD_URL secret is not set"
+          # Default to prod for scheduled runs
+          ENV="${ENV_INPUT:-prod}"
+
+          case "$ENV" in
+            dev)
+              URL="$CALLME_CLOUD_URL_DEV"
+              ;;
+            staging)
+              URL="$CALLME_CLOUD_URL_STAGING"
+              ;;
+            prod|"")
+              URL="$CALLME_CLOUD_URL_PROD"
+              ;;
+            *)
+              echo "::error::Unknown environment: $ENV"
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$URL" ]; then
+            echo "::error::CALLME_CLOUD_URL_${ENV^^} secret is not set"
             exit 1
           fi
 
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 "${CALLME_CLOUD_URL}/health" 2>/dev/null || echo "failed")
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "env=$ENV" >> $GITHUB_OUTPUT
+          echo "✓ Using $ENV environment: $URL"
+
+      - name: Verify cloud server is reachable
+        env:
+          CALLME_CLOUD_URL: ${{ steps.env_url.outputs.url }}
+        run: |
+          if [ -z "$CALLME_CLOUD_URL" ]; then
+            echo "::error::CALLME_CLOUD_URL is not set"
+            exit 1
+          fi
+
+          STATUS=$(curl -sLf -o /dev/null -w "%{http_code}" --max-time 10 "${CALLME_CLOUD_URL}/health" 2>/dev/null || echo "failed")
 
           if [ "$STATUS" != "200" ]; then
             echo "::error::Cloud server not reachable at ${CALLME_CLOUD_URL}/health (got: $STATUS)"
-            echo "Check that your server is deployed and CALLME_CLOUD_URL is correct."
+            echo "Check that your server is deployed and the URL is correct."
             exit 1
           fi
           echo "✓ Cloud server healthy"
@@ -318,7 +365,7 @@ jobs:
 
       - name: Configure MCP for call-me-cloud
         env:
-          CALLME_CLOUD_URL: ${{ secrets.CALLME_CLOUD_URL }}
+          CALLME_CLOUD_URL: ${{ steps.env_url.outputs.url }}
           CALLME_API_KEY: ${{ secrets.CALLME_API_KEY }}
         run: |
           cat > /tmp/mcp-config.json << EOF
@@ -355,6 +402,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_PROMPT_CONTENT: ${{ steps.base_prompt.outputs.content }}
           BASE_PROMPT_NAME: ${{ steps.base_prompt.outputs.name }}
+          TARGET_ENV: ${{ steps.env_url.outputs.env }}
         run: |
           if [ "$EVENT_NAME" = "schedule" ] || [ -z "$USER_PROMPT" ]; then
             # Scheduled or no prompt provided: daily standup mode
@@ -378,7 +426,7 @@ jobs:
             fi
 
             cat << EOF
-          You are running in GitHub Actions for ${REPO_NAME}.
+          You are running in GitHub Actions for ${REPO_NAME} (${TARGET_ENV} environment).
 
           INSTRUCTIONS:
           1. IMMEDIATELY call the user using initiate_call
@@ -486,12 +534,14 @@ jobs:
           COMMITS_PUSHED: ${{ steps.push.outputs.commits_pushed }}
           BRANCH_URL: ${{ steps.push.outputs.branch_url }}
           PROMPT: ${{ inputs.prompt }}
+          TARGET_ENV: ${{ steps.env_url.outputs.env }}
         run: |
           {
             echo "## ✅ Call Completed Successfully"
             echo ""
             echo "| Detail | Value |"
             echo "|--------|-------|"
+            echo "| **Environment** | \`$TARGET_ENV\` |"
             echo "| **Branch** | \`$BRANCH_NAME\` |"
             echo "| **Commits pushed** | $COMMITS_PUSHED |"
             echo "| **Trigger** | ${{ github.event_name }} |"
@@ -509,12 +559,14 @@ jobs:
         if: failure()
         env:
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          TARGET_ENV: ${{ steps.env_url.outputs.env }}
         run: |
           {
             echo "## ❌ Call Failed"
             echo ""
             echo "| Detail | Value |"
             echo "|--------|-------|"
+            echo "| **Environment** | \`${TARGET_ENV:-unknown}\` |"
             echo "| **Branch** | \`${BRANCH_NAME:-not created}\` |"
             echo "| **Trigger** | ${{ github.event_name }} |"
             echo "| **Run** | [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
