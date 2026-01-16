@@ -180,6 +180,7 @@ export class RateLimiter {
         this.phoneBuckets.delete(phoneNumber);
         this.phoneTimeouts.delete(phoneNumber);
       }, this.config.perPhone.blockDurationMs);
+      timeout.unref(); // Don't block process exit
       this.phoneTimeouts.set(phoneNumber, timeout);
     }
     return bucket;
@@ -202,6 +203,7 @@ export class RateLimiter {
         this.conversationBuckets.delete(conversationSid);
         this.conversationTimeouts.delete(conversationSid);
       }, 7 * 60 * 1000); // 7 minutes - typical session inactivity timeout
+      timeout.unref(); // Don't block process exit
       this.conversationTimeouts.set(conversationSid, timeout);
     }
     return bucket;

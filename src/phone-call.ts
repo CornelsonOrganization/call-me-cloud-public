@@ -19,6 +19,7 @@ import { validateWhatsAppMessage, hashForLogging } from './webhook-validation.js
 import { detectCallRequest } from './keyword-detection.js';
 import { SessionManager, type CallState, type ServerConfig } from './session-manager.js';
 import type { StatusCallbackEvent } from './providers/phone-twilio.js';
+import type { ConversationService } from './storage/index.js';
 
 // Re-export types for backward compatibility
 export type { CallState, ServerConfig } from './session-manager.js';
@@ -69,15 +70,31 @@ export class CallManager {
   private currentCallId = 0;
   private externalServer: boolean = false;
   private rateLimiter: RateLimiter;  // WhatsApp rate limiting
+  private conversationService: ConversationService | null = null;
 
-  constructor(config: ServerConfig, existingServer?: ReturnType<typeof createServer>) {
+  constructor(config: ServerConfig, existingServer?: ReturnType<typeof createServer>, conversationService?: ConversationService) {
     this.config = config;
     this.sessionManager = new SessionManager(config);
     this.rateLimiter = new RateLimiter();  // Initialize rate limiter with defaults
+    this.conversationService = conversationService || null;
     if (existingServer) {
       this.httpServer = existingServer;
       this.externalServer = true;
       this.setupWebSocket();
+    }
+  }
+
+  /**
+   * Persist a conversation using the ConversationService
+   */
+  private async persistConversation(state: CallState): Promise<void> {
+    if (!this.conversationService) return;
+
+    try {
+      await this.conversationService.persistConversation(state, this.config.userPhoneNumber);
+    } catch (error) {
+      console.error(`[${state.callId}] Failed to persist conversation:`, error);
+      // Don't throw - storage failure shouldn't break the call flow
     }
   }
 
@@ -1042,6 +1059,9 @@ export class CallManager {
       await this.config.messagingProvider.sendMessage(conversationSid, message, true);
       console.error(`[${messageId}] WhatsApp message sent, waiting for response...`);
 
+      // Add outgoing message to conversation history
+      state.conversationHistory.push({ speaker: 'claude', message });
+
       // Wait for response with timeout (3 minutes)
       const response = await new Promise<string>((resolve, reject) => {
         let settled = false;
@@ -1060,6 +1080,12 @@ export class CallManager {
           resolve(response);
         });
       });
+
+      // Add user response to conversation history
+      state.conversationHistory.push({ speaker: 'user', message: response });
+
+      // Persist the WhatsApp conversation
+      await this.persistConversation(state);
 
       return { messageId, response };
     } catch (error: any) {
@@ -1220,6 +1246,9 @@ export class CallManager {
     }
 
     const durationSeconds = Math.round((Date.now() - state.startTime) / 1000);
+
+    // Persist conversation to storage before cleanup
+    await this.persistConversation(state);
 
     // Clean up session and timers via SessionManager
     this.sessionManager.removeSession(callId);
@@ -1572,6 +1601,8 @@ export class CallManager {
     for (const callId of this.activeCalls.keys()) {
       this.sessionManager.removeSession(callId);
     }
+
+    // Note: ConversationService is closed by the main server via closeConversationService()
 
     this.wss?.close();
     this.httpServer?.close();

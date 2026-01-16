@@ -1,3 +1,10 @@
 node_modules
 .env
 bun.lockb
+logs.*.json
+
+# Claude Code / claude-flow (local development only)
+.mcp.json
+.claude/settings.local.json
+.claude-flow/
+*.claude-flow

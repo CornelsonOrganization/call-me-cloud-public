@@ -10,6 +10,7 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { getConversationService, closeConversationService, type ConversationService } from './storage/index.js';
 
 const port = parseInt(process.env.PORT || '3333', 10);
 const API_KEY = process.env.CALLME_API_KEY;
@@ -17,6 +18,7 @@ const API_KEY = process.env.CALLME_API_KEY;
 // Start HTTP server immediately for health checks
 const server = createServer();
 let callManager: any = null;
+let conversationService: ConversationService | null = null;
 let publicUrl = '';
 let configError = '';
 
@@ -209,8 +211,12 @@ async function initializeCallManager() {
   console.error(`Public URL: ${publicUrl}`);
 
   try {
+    // Initialize conversation service (auto-detects Redis or local file based on env)
+    conversationService = await getConversationService();
+    console.error('Conversation service initialized');
+
     const serverConfig = loadServerConfig(publicUrl);
-    callManager = new CallManager(serverConfig, server);
+    callManager = new CallManager(serverConfig, server, conversationService);
     console.error('CallMe Cloud Server ready');
     // Redact phone numbers in logs for privacy
     const redactPhone = (phone: string) => phone.slice(0, -8).replace(/./g, '*') + phone.slice(-4);
@@ -224,5 +230,15 @@ async function initializeCallManager() {
 initializeCallManager();
 
 // Graceful shutdown
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+async function gracefulShutdown() {
+  console.error('Shutting down...');
+  if (callManager) {
+    callManager.shutdown();
+  }
+  await closeConversationService();
+  console.error('Shutdown complete');
+  process.exit(0);
+}
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
