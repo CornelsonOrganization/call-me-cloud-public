@@ -4,515 +4,272 @@
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun)](https://bun.sh)
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/call-me-cloud)
 
-**Voice conversations for AI agents.** Let Claude call you on the phone for real-time voice discussions - even when your laptop is off.
+**Voice conversations for AI agents.** Let Claude call you on the phone for real-time discussions - even when your laptop is off.
 
 Built for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) - works with Claude Code, Claude Desktop, GitHub Actions, and any MCP-compatible client.
 
-> **Note:** While Call-Me Cloud supports Docker and various hosting options, **the recommended path from the creator uses Railway + Twilio** for the smoothest setup experience.
+## Quick Start
 
-## Prerequisites
+**New to this project?** → See **[QUICKSTART.md](QUICKSTART.md)** for setup with a coding agent
 
-Before setting up Call-Me Cloud, you'll need accounts with these services:
+**Already set up?** → Jump to [Example Usage](#example-usage)
 
-| Service | Purpose | Cost |
-|---------|---------|------|
-| **[Railway](https://railway.app)** | Cloud hosting for the call server | Free tier: $5/month credit |
-| **[Twilio](https://twilio.com)** | Phone service provider | ~$1/mo phone + $0.014/min calls |
-| **[Anthropic](https://console.anthropic.com)** | Claude API for GitHub Actions | Usage-based pricing |
-| **[OpenAI](https://platform.openai.com)** | Text-to-speech and speech-to-text | ~$0.06/min for Realtime API |
-| **[GitHub](https://github.com)** (optional) | For GitHub Actions integration | Free (2,000 Actions minutes/month for private repos) |
+## Why Voice?
 
-You'll also need to generate a secure API key (`CALLME_API_KEY`) - more on this in the configuration section.
+Text is great for code. Voice is better for:
+- **Decisions that need discussion** - "Should I force push to main?"
+- **Async updates** - "Call me when the 15-min build finishes"
+- **Complex explanations** - Walking through legacy code
+- **Hands-free work** - Discussing architecture while commuting
 
-## Features
+See [15 detailed use cases](docs/USE-CASES.md) with storyboards.
 
-- **Interrupt naturally** - Cut Claude off mid-sentence, just like a real conversation
-- **Call from anywhere** - GitHub Actions integration means Claude can reach you even when your laptop is off
-- **No tunneling headaches** - Cloud-native deployment to Railway or Render, no ngrok needed
-- **Low-latency speech** - Streaming text-to-speech for responsive conversations
-- **Production-ready security** - Webhook signature validation and token-based auth built in
+## Example Usage
+
+### Call from GitHub Actions (Laptop Off)
+
+```bash
+# Trigger a delayed call
+gh workflow run call.yml \
+  -f delay_minutes=10 \
+  -f prompt="I'm going for a run. Call me to discuss the API design"
+
+# Monitor a build
+gh workflow run call.yml \
+  -f prompt="Watch the CI build and call me when it finishes"
+
+# Get approval before dangerous operations
+gh workflow run call.yml \
+  -f prompt="Review the database migration and call me before running it"
+```
+
+### Call from Local Claude Session (Quick)
+
+```
+You: Call me to discuss the authentication refactor
+
+Claude: [Initiates phone call]
+```
+
+### Real Conversation Example
+
+**You trigger:**
+```bash
+gh workflow run call.yml \
+  -f prompt="Review PR #123 and call me with concerns"
+```
+
+**15 minutes later, Claude calls:**
+```
+Claude: "Hey, I reviewed PR #123. Overall looks solid, but I have
+         concerns about error handling in auth-controller.ts line 89.
+         The catch block doesn't log the error context. Want to discuss?"
+
+You:    "What would you recommend?"
+
+Claude: "I'd add structured logging with the user ID and request path.
+         Should I make that change now?"
+
+You:    "Yes, do it"
+
+Claude: "Done. Pushed to the PR branch. Anything else?"
+
+You:    "No, looks good"
+
+Claude: "Great, hanging up now. Talk later!"
+```
+
+**Result:** PR updated with improved error handling, all while you were away from your laptop.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Your Computer                                   │
-│  ┌─────────────────┐                                                        │
-│  │  Claude Code    │                                                        │
-│  │  (MCP Client)   │────┐                                                   │
-│  └─────────────────┘    │                                                   │
-│           ▲             │ stdio                                             │
-│           │             ▼                                                   │
-│  ┌─────────────────┐                                                        │
-│  │  MCP Server     │ (local)                                                │
-│  │  mcp-client/    │                                                        │
-│  └────────┬────────┘                                                        │
-└───────────┼─────────────────────────────────────────────────────────────────┘
-            │ HTTPS (REST API)
-            ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Cloud (Railway / Render)                            │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                      call-me-cloud server                            │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐    │   │
-│  │  │ REST API │  │ Webhook  │  │WebSocket │  │ Audio Processing │    │   │
-│  │  │ Handler  │  │ Handler  │  │ Server   │  │ (resample/encode)│    │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘    │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└───────────┬─────────────────────────────────┬───────────────────────────────┘
-            │                                 │
-            ▼                                 ▼
-     ┌─────────────┐                  ┌─────────────┐
-     │   Twilio    │                  │   OpenAI    │
-     │             │                  │  TTS / STT  │
-     │             │                  │  Realtime   │
-     └──────┬──────┘                  └─────────────┘
-            │
-            ▼
-     ┌─────────────┐
-     │ Your Phone  │
-     │   📱        │
-     └─────────────┘
+┌─────────────────────────────────────────────┐
+│  Your Computer                              │
+│  ┌──────────────┐         ┌───────────────┐│
+│  │ Claude Code  │◄─stdio──┤  MCP Client   ││
+│  └──────────────┘         └───────┬───────┘│
+└────────────────────────────────────┼────────┘
+                                     │ HTTPS
+┌────────────────────────────────────┼────────┐
+│  Railway/Cloud                     ▼        │
+│  ┌─────────────────────────────────────┐   │
+│  │  call-me-cloud server               │   │
+│  │  • REST API  • WebSocket            │   │
+│  │  • Webhooks  • Audio Processing     │   │
+│  └──────┬────────────────────┬─────────┘   │
+└─────────┼────────────────────┼─────────────┘
+          │                    │
+          ▼                    ▼
+   ┌──────────┐         ┌──────────┐
+   │  Twilio  │         │  OpenAI  │
+   │  📞      │         │  🎤 🔊   │
+   └─────┬────┘         └──────────┘
+         │
+         ▼
+   ┌──────────┐
+   │ Your 📱  │
+   └──────────┘
 ```
 
-## Use Cases
+## Features
 
-Real-world scenarios where voice communication shines over text.
+- ✅ **Interrupt naturally** - Cut Claude off mid-sentence
+- ✅ **Call from anywhere** - GitHub Actions means no laptop needed
+- ✅ **No tunneling** - Cloud-native, no ngrok
+- ✅ **Low latency** - Streaming TTS for responsive conversations
+- ✅ **Secure** - Webhook validation and token auth built in
 
-<table>
-<tr>
-<td width="50%">
-
-### 🏃 Build Watcher
-
-You kick off a 15-minute CI build and go for a walk. Claude monitors the build and calls you when it finishes.
-
-**Claude:** "Hey, the deployment completed successfully. Everything's green. Want me to merge to main?"
-
-![Build Watcher](docs/storyboards/02-build-watcher.png)
-
-</td>
-<td width="50%">
-
-### ⚠️ Dangerous Operation Approval
-
-Claude needs to force push to main after a complex rebase.
-
-**Claude:** "I'm about to force push to main. This will overwrite commits from the last 2 hours. Should I proceed?"
-
-**You:** "Wait, did anyone else push?"
-
-Voice confirmation prevents catastrophic mistakes.
-
-![Dangerous Operation](docs/storyboards/04-dangerous-operation.png)
-
-</td>
-</tr>
-</table>
-
-**More scenarios:** See [docs/USE-CASES.md](docs/USE-CASES.md) for 15 detailed storyboards including:
-- **Missed Call Recovery** - Seamless voice-to-SMS continuity when you don't answer
-- **Driving Developer** - Productive commute time with hands-free conversations
-- **Power Platform Pipeline** - Low-code CI/CD, completely hands-free
-- **Meeting-to-Spec Converter** - Turn discussions into specs while commuting
-- And 11 more...
-
-## Quick Start
-
-Choose your path:
-- **[GitHub Actions](#quick-start-github-actions)** (Recommended) - Simpler setup, works anywhere, even when laptop is off
-- **[Local MCP](#quick-start-local-mcp)** - For quick calls when you're near your laptop
-
-### Quick Start: GitHub Actions
-
-This is the easiest way to get started. Your laptop can be closed, you can be on a run - Claude calls you from the cloud.
-
-**Prerequisites:**
-1. A Railway deployment with Twilio configured (see [Deploy to Railway](#1-deploy-to-railway))
-2. A GitHub repository
-3. API keys: Anthropic, OpenAI, and your Call-Me Cloud API key
-
-**Setup:**
-
-1. **Copy the workflow file** to your repo:
-   ```bash
-   mkdir -p .github/workflows
-   curl -o .github/workflows/call.yml https://raw.githubusercontent.com/CornelsonOrganization/call-me-cloud-public/main/.github/workflows/call.yml
-   ```
-
-2. **Add GitHub Secrets** (Settings → Secrets and variables → Actions → New repository secret):
-   - `ANTHROPIC_API_KEY` - Your Anthropic API key for Claude
-   - `CALLME_API_KEY` - Your Call-Me Cloud API key (same as your Railway deployment)
-   - `CALLME_CLOUD_URL` - Your Railway deployment URL (e.g., `https://your-app.railway.app`)
-
-3. **Trigger a call** (two ways):
-
-   **Option A: From a Local Claude Session (Programmatic)**
-
-   If you're in a Claude Code session with repo access, use the GitHub CLI:
-   ```bash
-   # Immediate call
-   gh workflow run call.yml -f prompt="Quick standup - what did I work on today?"
-
-   # Scheduled call (5 minutes from now)
-   gh workflow run call.yml -f delay_minutes=5 -f prompt="Review the API changes"
-
-   # Call with custom branch for commits
-   gh workflow run call.yml -f prompt="Refactor auth module" -f branch="feat/auth-refactor"
-   ```
-
-   **Option B: Manual Trigger via GitHub UI**
-
-   Navigate to your repository on GitHub (desktop or mobile):
-   1. Go to **Actions** tab
-   2. Select **Call** workflow from the left sidebar
-   3. Click **"Run workflow"** button
-   4. Fill in the prompt, delay, and branch fields
-   5. Click **"Run workflow"** to trigger
-
-   This is useful when you're away from your laptop or want to trigger a call without opening a Claude session.
-
-**How it works:**
-- Claude runs in GitHub Actions with full repo access
-- Calls you via your Railway deployment
-- Can make commits during the conversation
-- Pushes changes to the specified branch (or auto-generated branch)
-
-**Example use:**
-```bash
-# From a local Claude session before going on a run
-gh workflow run call.yml \
-  -f delay_minutes=10 \
-  -f prompt="I'm going for a 30-minute run. Call me to discuss the API design and any questions you have"
-```
-
-Claude calls you 10 minutes later while you're running, discusses the API, and commits any agreed-upon changes.
-
----
-
-### Quick Start: Local MCP
-
-Use this approach if you want Claude to call you from your local Claude Code or Claude Desktop sessions.
-
-#### 1. Deploy to Railway
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/CornelsonOrganization/call-me-cloud-public)
-
-Or manually:
-1. Fork this repo
-2. Connect to [Railway](https://railway.app)
-3. Add environment variables (see [Configuration](#configuration))
-
-#### 2. Configure Twilio
-
-> **Note:** Phone provider setup takes ~1 hour. You'll be switching between portals and copying credentials back and forth. It's not hard, just fiddly.
-
-1. Get a phone number from [Twilio Console](https://console.twilio.com)
-2. Set webhook URL to `https://YOUR-RAILWAY-URL/twiml` (POST)
-
-#### 3. Install MCP Client
-
-```bash
-cd mcp-client
-bun install
-```
-
-#### 4. Add to Claude Code
-
-```bash
-claude mcp add call-me -- bun run /path/to/call-me-cloud/mcp-client/index.ts
-```
-
-Set environment variables in your Claude config (`~/.claude.json`):
-
-```json
-{
-  "mcpServers": {
-    "call-me": {
-      "command": "bun",
-      "args": ["run", "/path/to/call-me-cloud/mcp-client/index.ts"],
-      "env": {
-        "CALLME_CLOUD_URL": "https://your-app.railway.app",
-        "CALLME_API_KEY": "your-secret-api-key"
-      }
-    }
-  }
-}
-```
-
-#### 5. Test It
-
-```
-You: Call me to discuss the project status
-Claude: [Initiates phone call]
-```
-
----
-
-## Using Call-Me Cloud in Your Own Repos
-
-Want Claude to call you while working on any repository? Here's how to integrate call-me-cloud into your existing projects.
+## Setup
 
 ### Prerequisites
 
-| Requirement | Description |
-|-------------|-------------|
-| Railway deployment | A running call-me-cloud server ([deploy here](#1-deploy-to-railway)) |
-| GitHub repository | The repo where Claude will work |
-| GitHub Secrets | `CALLME_CLOUD_URL`, `CALLME_API_KEY`, `ANTHROPIC_API_KEY` |
+You'll need accounts with:
+- **[Railway](https://railway.app)** - Free tier: $5/month credit
+- **[Twilio](https://twilio.com)** - ~$1/mo phone + $0.014/min calls
+- **[OpenAI](https://platform.openai.com)** - ~$0.06/min for speech
+- **[Anthropic](https://console.anthropic.com)** - For GitHub Actions (usage-based)
 
-### Quick Setup (GitHub Actions Only)
+### Recommended: Setup with a Coding Agent
 
-1. **Copy the workflow file:**
+1. Clone this repo
+2. Start a Claude Code session
+3. Ask: *"Help me deploy call-me-cloud to Railway and set up Twilio"*
+
+The agent will guide you through account creation, environment variables, and testing.
+
+**Full guide:** [QUICKSTART.md](QUICKSTART.md)
+
+### Manual Setup
+
+<details>
+<summary>Deploy to Railway (click to expand)</summary>
+
+1. Click: [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/CornelsonOrganization/call-me-cloud-public)
+
+2. Set environment variables:
+   ```bash
+   CALLME_API_KEY=<generate with: openssl rand -base64 32>
+   CALLME_PHONE_ACCOUNT_SID=<from Twilio console>
+   CALLME_PHONE_AUTH_TOKEN=<from Twilio console>
+   CALLME_PHONE_NUMBER=<Twilio number: +1XXXYYYZZZZ>
+   CALLME_USER_PHONE_NUMBER=<your number: +1XXXYYYZZZZ>
+   CALLME_OPENAI_API_KEY=<from OpenAI>
+   ```
+
+3. Deploy and note your URL: `https://your-app.railway.app`
+
+</details>
+
+<details>
+<summary>Configure Twilio (click to expand)</summary>
+
+1. Get a phone number from [Twilio Console](https://console.twilio.com)
+2. Set webhook URL to `https://YOUR-RAILWAY-URL/twiml` (POST)
+3. Save and test
+
+</details>
+
+<details>
+<summary>GitHub Actions Integration (click to expand)</summary>
+
+1. Copy workflow file:
    ```bash
    mkdir -p .github/workflows
    curl -o .github/workflows/call.yml \
      https://raw.githubusercontent.com/CornelsonOrganization/call-me-cloud-public/main/.github/workflows/call.yml
    ```
 
-2. **Add GitHub Secrets** (Settings → Secrets → Actions):
-   - `ANTHROPIC_API_KEY` - Your Anthropic API key
-   - `CALLME_API_KEY` - Same key as your Railway deployment
-   - `CALLME_CLOUD_URL` - Your Railway URL (e.g., `https://your-app.railway.app`)
+2. Add GitHub Secrets (Settings → Secrets → Actions):
+   - `ANTHROPIC_API_KEY`
+   - `CALLME_API_KEY`
+   - `CALLME_CLOUD_URL`
 
-3. **Trigger a call:**
+3. Trigger:
    ```bash
-   gh workflow run call.yml -f prompt="Review the latest changes"
+   gh workflow run call.yml -f prompt="Your task here"
    ```
 
-### Base Prompt System
+</details>
 
-Select a persona for Claude using the `base_prompt` input. Base prompts define Claude's expertise and communication style.
+<details>
+<summary>Local MCP Client (click to expand)</summary>
 
-**Available presets:**
-| Preset | Description | Best For |
-|--------|-------------|----------|
-| `default` | Standard Claude Code behavior | General development |
-| `office-mode` | Office document specialist | Creating docs, slides, spreadsheets |
-| `crowe-studio` | Crowe Studio branded documents | Documents following 9 Formatting Basics |
-| `power-platform` | Power Platform & PAC CLI expert | Power Apps/Automate work |
-| `meeting-notes` | Design spec writer | Turning discussions into specs |
-| `code-review` | Thorough reviewer with mentorship focus | PR reviews |
-
-**Usage:**
-```bash
-gh workflow run call.yml \
-  -f base_prompt="power-platform" \
-  -f prompt="Deploy the new order processing flow"
-```
-
-**Composition:** Base prompts layer with your dynamic prompt:
-```
-Base Prompt (persona/expertise)
-    +
-Dynamic Prompt (specific task)
-    =
-What Claude sees
-```
-
-### Creating Custom Base Prompts
-
-1. **Create the directory:**
+1. Install dependencies:
    ```bash
-   mkdir -p .github/base-prompts
+   cd mcp-client && bun install
    ```
 
-2. **Add a prompt file** (e.g., `.github/base-prompts/my-team.md`):
-   ```markdown
-   ---
-   name: My Team Workflow
-   description: Our team's conventions and practices
-   recommended_model: sonnet
-   ---
-
-   You are an expert in our team's codebase and conventions.
-
-   ## Key Files
-   - `src/api/` - Backend API handlers
-   - `scripts/deploy.sh` - Deployment script
-
-   ## Conventions
-   - Always run tests before committing
-   - Use conventional commit messages
+2. Add to Claude config (`~/.claude.json`):
+   ```json
+   {
+     "mcpServers": {
+       "call-me": {
+         "command": "bun",
+         "args": ["run", "/path/to/call-me-cloud/mcp-client/index.ts"],
+         "env": {
+           "CALLME_CLOUD_URL": "https://your-app.railway.app",
+           "CALLME_API_KEY": "your-secret-api-key"
+         }
+       }
+     }
+   }
    ```
 
-3. **Add to workflow inputs** (edit `.github/workflows/call.yml`):
-   ```yaml
-   base_prompt:
-     options:
-       - default
-       - my-team  # Add your custom prompt
+3. Test:
+   ```
+   You: Call me to discuss the project
+   Claude: [Initiates call]
    ```
 
-### Example: Power Platform DevKit
+</details>
 
-Perfect for teams using Power Platform with CI/CD:
+## Use Cases
 
-1. **Create `.github/base-prompts/power-platform.md`** (or copy from this repo)
+Real-world scenarios where voice shines:
 
-2. **Add `CLAUDE.md` to your repo:**
-   ```markdown
-   # Power Platform Conventions
+| Scenario | Example |
+|----------|---------|
+| **Build Watcher** | "Call me when the 15-min CI build finishes" |
+| **Dangerous Operations** | "I'm about to force push to main - confirm first?" |
+| **Code Review** | "Review PR #89 and discuss concerns while I'm driving" |
+| **Complex Explanations** | Walking through legacy authentication flow |
+| **Missed Call Recovery** | SMS fallback when you don't answer |
+| **Meeting-to-Spec** | Turn meeting notes into specs during commute |
 
-   ## Solution Structure
-   - Main solution: `solutions/MainSolution/`
-   - Managed exports: `releases/`
+**See [docs/USE-CASES.md](docs/USE-CASES.md) for 15 detailed storyboards**
 
-   ## Before pushing
-   - Run: `pac solution check`
-   - Export: `pac solution export --overwrite`
-   ```
+## Configuration Reference
 
-3. **Trigger during commute:**
-   ```bash
-   gh workflow run call.yml \
-     -f base_prompt="power-platform" \
-     -f prompt="Add a new flow for order notifications" \
-     -f delay_minutes=10
-   ```
-
-### Example: Meeting Notes → Design Specs
-
-Convert meeting discussions into formal specifications:
-
-1. **Repository structure:**
-   ```
-   meetings/
-     2025-01-10-api-design.md
-   specs/
-     (Claude writes here)
-   decisions/
-     (ADRs go here)
-   ```
-
-2. **Trigger while commuting:**
-   ```bash
-   gh workflow run call.yml \
-     -f base_prompt="meeting-notes" \
-     -f prompt="Review yesterday's API meeting and draft the auth flow spec"
-   ```
-
-3. **Claude calls you:**
-   > "Hey, I read the transcript from yesterday's API design meeting. The main decision was to use GraphQL, but I noticed some open questions about caching. Can you clarify the expected TTL?"
-
-4. **After the call:** Claude commits a formal spec to `specs/auth-flow.md`
-
-### Office Skills Integration
-
-The `office-mode` and `crowe-studio` base prompts enable Claude to create professional documents using Anthropic's official Office skills:
-
-**Supported document types:**
-- **Word Documents (docx)** - PRDs, specs, reports, memos
-- **Excel Spreadsheets (xlsx)** - Data analysis, budgets, tracking
-- **PowerPoint Presentations (pptx)** - Decks, pitches, reviews
-- **PDF Documents (pdf)** - Formal reports, contracts
-
-**How it works:**
-1. Select `office-mode` or `crowe-studio` as your base prompt
-2. The workflow automatically loads required Python dependencies
-3. Claude can create and edit Office documents during the call
-4. Documents are saved to your repository and committed
-
-**Usage:**
-```bash
-# Create a presentation during a phone call
-gh workflow run call.yml \
-  -f base_prompt="office-mode" \
-  -f prompt="Create a quarterly review presentation for Q4 results"
-
-# Create Crowe-branded documents
-gh workflow run call.yml \
-  -f base_prompt="crowe-studio" \
-  -f prompt="Create a PRD for the new authentication feature"
-```
-
-### Example: Crowe Studio Branded Documents
-
-For teams following the Crowe Studio 9 Formatting Basics:
-
-1. **Use the `crowe-studio` base prompt:**
-   ```bash
-   gh workflow run call.yml \
-     -f base_prompt="crowe-studio" \
-     -f prompt="Create a project status deck for stakeholders"
-   ```
-
-2. **Claude follows the 9 Formatting Basics:**
-   - Arial font family (9pt minimum)
-   - Theme colors only (#D38938 orange, #0F2D5E blue, etc.)
-   - Orange square bullets
-   - Flat design (no shadows, bevels, or 3D effects)
-   - Proper table formatting with orange headers
-
-3. **Theme configuration available at:** `templates/themes/crowe-studio.json`
-
-4. **Color palette:**
-   | Color | Hex | Usage |
-   |-------|-----|-------|
-   | Studio Orange | #D38938 | Primary, highlights |
-   | Crowe Blue | #0F2D5E | Headers, backgrounds |
-   | Teal | #48A188 | Success indicators |
-   | Yellow | #F3BC44 | Warnings |
-   | Red | #B02418 | Errors |
-   | Grey | #CCCCCC | Neutral |
-
-### Skills Configuration
-
-Base prompts can declare required skills in `.github/prompt-skills/{prompt-name}/skills.yml`:
-
-```yaml
-# .github/prompt-skills/office-mode/skills.yml
-skills:
-  plugins:
-    - name: anthropics/skills
-      skills:
-        - docx
-        - xlsx
-        - pptx
-        - pdf
-
-  python_deps:
-    - python-docx>=0.8.11
-    - openpyxl>=3.1.0
-    - python-pptx>=0.6.21
-```
-
-The workflow automatically:
-- Validates the skills configuration
-- Installs Python dependencies
-- Enables the Skill tool for document generation
-
-## Configuration
-
-### Cloud Server Environment Variables
+### Cloud Server (Railway)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CALLME_API_KEY` | Yes | - | Secret key for API authentication (you generate this - see note below) |
-| `CALLME_PHONE_ACCOUNT_SID` | Yes | - | Twilio Account SID |
-| `CALLME_PHONE_AUTH_TOKEN` | Yes | - | Twilio Auth Token |
-| `CALLME_PHONE_NUMBER` | Yes | - | Your Twilio phone number (format: +1XXXYYYZZZZ) |
-| `CALLME_USER_PHONE_NUMBER` | Yes | - | Your personal phone number to receive calls (format: +1XXXYYYZZZZ) |
-| `CALLME_OPENAI_API_KEY` | Yes | - | OpenAI API key for TTS/STT (Realtime API) |
-| `CALLME_TTS_MODEL` | No | `gpt-4o-mini-tts` | TTS model (`gpt-4o-mini-tts` or `tts-1`) |
-| `CALLME_TTS_VOICE` | No | `ballad` | TTS voice (see [Voices](#available-voices)) |
-| `CALLME_TTS_INSTRUCTIONS` | No | - | Voice style instructions, e.g. "Speak cheerfully" (gpt-4o-mini-tts only) |
-| `OPENAI_API_BASE_URL` | No | - | Regional OpenAI endpoint (e.g., `us.api.openai.com`) |
+| `CALLME_API_KEY` | ✅ | - | Auth token (generate with `openssl rand -base64 32`) |
+| `CALLME_PHONE_ACCOUNT_SID` | ✅ | - | Twilio Account SID |
+| `CALLME_PHONE_AUTH_TOKEN` | ✅ | - | Twilio Auth Token |
+| `CALLME_PHONE_NUMBER` | ✅ | - | Twilio number (+1XXXYYYZZZZ) |
+| `CALLME_USER_PHONE_NUMBER` | ✅ | - | Your phone (+1XXXYYYZZZZ) |
+| `CALLME_OPENAI_API_KEY` | ✅ | - | OpenAI API key |
+| `CALLME_TTS_MODEL` | ❌ | `gpt-4o-mini-tts` | TTS model |
+| `CALLME_TTS_VOICE` | ❌ | `coral` | Voice (see [voices](#voices)) |
+| `CALLME_TTS_INSTRUCTIONS` | ❌ | - | Voice style, e.g. "Speak cheerfully" |
 
-> **Generating `CALLME_API_KEY`:** This is a secret you create yourself to secure communication between your MCP client and cloud server. Generate a secure random string (32+ characters) using:
-> ```bash
-> openssl rand -base64 32
-> ```
-> Use the same key in both your Railway deployment and your MCP client configuration.
-
-### MCP Client Environment Variables
+### MCP Client (Local)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CALLME_CLOUD_URL` | Yes | Your Railway/Render deployment URL |
-| `CALLME_API_KEY` | Yes | Same API key as cloud server |
+| `CALLME_CLOUD_URL` | ✅ | Railway URL |
+| `CALLME_API_KEY` | ✅ | Same as server |
 
-### Available Voices
+### GitHub Actions
+
+Add as Repository Secrets:
+- `ANTHROPIC_API_KEY`
+- `CALLME_API_KEY`
+- `CALLME_CLOUD_URL`
+
+### Voices
 
 **gpt-4o-mini-tts** (default): `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`
 
@@ -523,11 +280,11 @@ The workflow automatically:
 All endpoints require `Authorization: Bearer <API_KEY>` header.
 
 ### Initiate Call
-```http
-POST /api/call
-Content-Type: application/json
-
-{"message": "Hey, I wanted to discuss the project status."}
+```bash
+curl -X POST https://your-app.railway.app/api/call \
+  -H "Authorization: Bearer $CALLME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hey, wanted to discuss the project status"}'
 ```
 
 **Response:**
@@ -540,169 +297,137 @@ Content-Type: application/json
 ```
 
 ### Continue Conversation
-```http
-POST /api/call/:callId/continue
-Content-Type: application/json
-
-{"message": "What about the timeline?"}
+```bash
+curl -X POST https://your-app.railway.app/api/call/CALL_ID/continue \
+  -H "Authorization: Bearer $CALLME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What about the timeline?"}'
 ```
 
-### Speak Without Waiting
-```http
-POST /api/call/:callId/speak
-Content-Type: application/json
-
-{"message": "Let me explain..."}
+### Speak (No Wait)
+```bash
+curl -X POST https://your-app.railway.app/api/call/CALL_ID/speak \
+  -H "Authorization: Bearer $CALLME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Let me explain the approach..."}'
 ```
 
 ### End Call
-```http
-POST /api/call/:callId/end
-Content-Type: application/json
-
-{"message": "Thanks, talk to you later!"}
-```
-
-**Response:**
-```json
-{"durationSeconds": 45}
-```
-
-### Health Check
-```http
-GET /health
+```bash
+curl -X POST https://your-app.railway.app/api/call/CALL_ID/end \
+  -H "Authorization: Bearer $CALLME_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Thanks, talk later!"}'
 ```
 
 ## MCP Tools
 
-When used with Claude Code or other MCP clients:
+Available when using Claude Code or MCP-compatible clients:
 
 | Tool | Description |
 |------|-------------|
-| `initiate_call` | Start a new phone call with an initial message |
-| `continue_call` | Send a follow-up message and wait for response |
-| `speak_to_user` | Speak without waiting for a response |
-| `end_call` | End the call with a closing message |
+| `initiate_call` | Start a phone call with an initial message |
+| `continue_call` | Send message and wait for response |
+| `speak_to_user` | Speak without waiting |
+| `end_call` | End call with closing message |
+
+## GitHub Actions Base Prompts
+
+Select Claude's persona with the `base_prompt` input:
+
+| Preset | Best For |
+|--------|----------|
+| `default` | General development |
+| `office-mode` | Creating docs, slides, spreadsheets |
+| `crowe-studio` | Branded documents (9 Formatting Basics) |
+| `power-platform` | Power Apps/Automate work |
+| `meeting-notes` | Turning discussions into specs |
+| `code-review` | PR reviews with mentorship |
+
+**Usage:**
+```bash
+gh workflow run call.yml \
+  -f base_prompt="power-platform" \
+  -f prompt="Deploy the order processing flow"
+```
+
+**Create custom prompts:** Add `.github/base-prompts/my-prompt.md` to your repo.
+
+**Full guide:** [docs/github-actions-integration.md](docs/github-actions-integration.md)
 
 ## Costs
 
 | Service | Approximate Cost |
 |---------|------------------|
 | Railway | Free tier: $5/month credit |
-| Twilio | ~$1/mo phone + $0.014/min outbound |
-| OpenAI TTS | ~$15/1M characters |
-| OpenAI Realtime STT | ~$0.06/min |
+| Twilio | ~$1/mo + $0.014/min outbound |
+| OpenAI | ~$0.06/min (TTS + STT) |
 
 **Typical 1-minute call:** ~$0.05-0.08
-
-## Self-Hosting with Docker
-
-> **Note:** Docker support is a work in progress. The basics should work, but this hasn't been thoroughly tested yet. Contributions welcome!
-
-```bash
-docker build -t call-me-cloud .
-docker run -p 3333:3333 --env-file .env call-me-cloud
-```
-
-Or with docker-compose:
-
-```bash
-docker-compose up
-```
 
 ## Troubleshooting
 
 ### "Could not reach cloud server"
 - Verify `CALLME_CLOUD_URL` includes `https://`
 - Check Railway deployment is running
-- Ensure `CALLME_API_KEY` matches on both client and server
+- Ensure `CALLME_API_KEY` matches on client and server
 
 ### Call connects but no audio
 - Verify OpenAI API key has Realtime API access
-- Check Railway logs for WebSocket connection errors
-- Ensure `CALLME_TTS_VOICE` is a valid voice name
+- Check Railway logs for WebSocket errors
+- Ensure `CALLME_TTS_VOICE` is valid
 
 ### Twilio webhook errors
-- Webhook URL must be `https://YOUR-URL/twiml` (not `/api/call`)
-- Check Twilio Console for webhook delivery logs
+- URL must be `https://YOUR-URL/twiml` (not `/api/call`)
+- Check Twilio Console webhook logs
 - Verify `CALLME_PHONE_AUTH_TOKEN` is correct
 
-### Call cuts off early
-- Check Railway resource limits (memory/CPU)
-- Increase `CALLME_TRANSCRIPT_TIMEOUT_MS` for longer responses
+**More help:** Work with a coding agent - they can check logs and debug in real-time.
 
 ## Security
 
-- **API Authentication**: Bearer token required for all API endpoints
-- **Webhook Validation**: Twilio HMAC-SHA1 signatures verified
-- **WebSocket Auth**: Cryptographically secure tokens with timing-safe comparison
-- **No CORS**: Server-to-server only; browser access intentionally disabled
+- ✅ **API Authentication** - Bearer token required
+- ✅ **Webhook Validation** - Twilio HMAC-SHA1 signatures verified
+- ✅ **WebSocket Auth** - Cryptographically secure tokens
+- ✅ **No CORS** - Server-to-server only
 
-See [CLAUDE.md](CLAUDE.md) for security implementation details.
+See [CLAUDE.md](CLAUDE.md) for implementation details.
 
 ## Limitations
 
-- **Outbound calls only** - Claude calls you; you cannot call Claude. This is intentional for security reasons: allowing inbound calls to wake up a terminal session with elevated permissions would be dangerous when you can't actively monitor it.
-- **Miss the call, miss the conversation** - If you don't answer, the conversation stops. There's no voicemail or retry. Use `claude --resume` when you're back at your laptop to continue.
+- **Outbound calls only** - Claude calls you (not the reverse, for security)
+- **No voicemail** - If you miss the call, conversation stops (use `claude --resume`)
 
-## Use Cases
+## Documentation
 
-See [docs/USE-CASES.md](docs/USE-CASES.md) for 15 detailed storyboards showing when voice communication adds value:
-
-- **Missed Call Recovery** - Seamless voice-to-SMS continuity
-- **Build Watcher** - "Call me when CI finishes"
-- **Power Platform Pipeline** - Low-code CI/CD, hands-free
-- **Meeting-to-Spec Converter** - Ambient context capture
-- **Release Captain** - Releases without a keyboard
-- And 10 more...
+- **[QUICKSTART.md](QUICKSTART.md)** - Setup with coding agent (recommended)
+- **[docs/USE-CASES.md](docs/USE-CASES.md)** - 15 detailed scenarios
+- **[docs/github-actions-integration.md](docs/github-actions-integration.md)** - Advanced workflows
+- **[docs/PLUGINS.md](docs/PLUGINS.md)** - Plugin system
+- **[CLAUDE.md](CLAUDE.md)** - Developer guide for agents
 
 ## Roadmap
 
-### ✅ GitHub Actions Integration (Shipped!)
+### ✅ GitHub Actions Integration
+**Status:** Shipped January 2026
 
-**Status:** Launched January 2026
+Claude can call you from GitHub Actions, even when your laptop is off. Supports scheduled calls, delayed calls, and conversation-driven commits.
 
-Claude can now call you from GitHub Actions workflows, even when your laptop is off. Supports scheduled calls, delayed calls, and full conversation-driven commits.
+### 🔄 SMS Fallback
+**Status:** Feature complete, waiting on Twilio A2P 10DLC approval
 
-See the [GitHub Actions Quick Start](#quick-start-github-actions) for setup instructions.
+Automatic fallback to SMS when calls go unanswered. User can text "call me" to trigger a call back.
 
-**Key features:**
-- Manual trigger with custom prompts
-- Scheduled runs (e.g., daily standup at 9 AM)
-- Delayed calls (wait N minutes before calling)
-- Auto-generated or custom branch names for commits
-- Full Claude Code capabilities in CI/CD
-
----
-
-### 🔄 SMS Fallback (In Progress - Blocked on Twilio Approval)
-
-When calls go unanswered, automatically fall back to SMS and continue the conversation via text.
-
-| Aspect | Behavior |
-|--------|----------|
-| Trigger | After configurable timeout (`CALLME_SMS_TIMEOUT_SECONDS` env var) |
-| Conversation | Full text conversation until user says "call me" |
-| Detection | Fuzzy matching ("call me", "can you call", "let's talk", "phone me") |
-| Rate limiting | None |
-
-**Flow:**
-1. Call initiates, rings for configured timeout
-2. No answer → SMS sent with the original message
-3. User can reply via text indefinitely
-4. User texts "call me" (or similar) → Claude calls back
-5. 7-minute inactivity → session closes (resume with `claude --resume`)
-
-**Status:** Feature development complete. Waiting on Twilio A2P 10DLC approval to enable SMS in production test environment.
-
-See [DESIGN-sms-fallback.md](DESIGN-sms-fallback.md) for technical details.
+**See [docs/scheduled-calls.md](docs/scheduled-calls.md) for technical details**
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing`)
 3. Make your changes
 4. Submit a pull request
+
+**Issues:** [GitHub Issues](https://github.com/CornelsonOrganization/call-me-cloud-public/issues)
 
 ## License
 
@@ -710,7 +435,11 @@ MIT License - see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
-- Built with [Bun](https://bun.sh) for fast TypeScript execution
+- Built with [Bun](https://bun.sh)
 - Phone services by [Twilio](https://twilio.com)
 - Speech services by [OpenAI](https://openai.com)
 - Designed for the [Model Context Protocol](https://modelcontextprotocol.io)
+
+---
+
+**Pro tip:** After setup, add call-me-cloud to any repository in 2 minutes using GitHub Actions. See [QUICKSTART.md](QUICKSTART.md).
