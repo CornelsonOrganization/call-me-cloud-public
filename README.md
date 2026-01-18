@@ -8,19 +8,36 @@
 
 Built for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) - works with Claude Code, Claude Desktop, GitHub Actions, and any MCP-compatible client.
 
+## The Problem
+
+You kick off an agent task - a refactor, a build, a code review - and now you're **tethered to your laptop**. You can't step away. What if it heads in the wrong direction? What if it needs a decision? You end up watching, waiting, losing productive time to "laptop anxiety."
+
+## The Solution
+
+Call-Me-Cloud eliminates the tether. Start a task, step away, and Claude calls when it needs you. Voice-first decision making means you can:
+
+- **Design features while vacuuming** - Real productivity during chores
+- **Review code during your commute** - Turn driving time into work time
+- **Approve deployments from anywhere** - No laptop required
+- **Stop watching progress bars** - Let Claude watch them for you
+
+This tool was built using itself - most commits came from phone conversations with Claude rather than traditional coding sessions. It's not perfect, but it demonstrates how much leverage these tools create.
+
 ## Quick Start
 
 **New to this project?** → See **[QUICKSTART.md](QUICKSTART.md)** for setup with a coding agent
 
 **Already set up?** → Jump to [Example Usage](#example-usage)
 
+**Setup time:** One afternoon to deploy and configure
+
 ## Why Voice?
 
 Text is great for code. Voice is better for:
-- **Decisions that need discussion** - "Should I force push to main?"
-- **Async updates** - "Call me when the 15-min build finishes"
-- **Complex explanations** - Walking through legacy code
-- **Hands-free work** - Discussing architecture while commuting
+- **Eliminating laptop anxiety** - Start work, walk away, Claude calls when done
+- **Dangerous operations** - Voice confirmation prevents catastrophic mistakes
+- **Complex decisions** - Discuss trade-offs in real-time
+- **Parallel workflows** - Talk while your hands are busy
 
 See [15 detailed use cases](docs/USE-CASES.md) with storyboards.
 
@@ -420,6 +437,17 @@ Automatic fallback to SMS when calls go unanswered. User can text "call me" to t
 
 **See [docs/scheduled-calls.md](docs/scheduled-calls.md) for technical details**
 
+## About This Project
+
+This tool was built in one week, from "interesting idea" to "production-ready." Most of the development happened through voice conversations with Claude while doing other things - walking, cleaning, commuting. The tool helped build itself.
+
+**This is a learning project.** It's not perfect, but it demonstrates:
+- How quickly you can ship with AI assistance
+- How much leverage voice-first workflows create
+- How easy it is to interact with modern AI tools
+
+**Copy this work.** Fit it to your workflow. Break it. Improve it. Share what you learn.
+
 ## Contributing
 
 1. Fork the repository
@@ -435,6 +463,7 @@ MIT License - see [LICENSE](LICENSE)
 
 ## Acknowledgments
 
+- Inspired by the original [Call-Me](https://github.com/modelcontextprotocol/servers) MCP server
 - Built with [Bun](https://bun.sh)
 - Phone services by [Twilio](https://twilio.com)
 - Speech services by [OpenAI](https://openai.com)
