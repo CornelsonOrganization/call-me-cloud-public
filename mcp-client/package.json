@@ -34,11 +34,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/riverscornelson/call-me-cloud.git"
+    "url": "git+https://github.com/CornelsonOrganization/call-me-cloud-public.git"
   },
-  "homepage": "https://github.com/riverscornelson/call-me-cloud#readme",
+  "homepage": "https://github.com/CornelsonOrganization/call-me-cloud-public#readme",
   "bugs": {
-    "url": "https://github.com/riverscornelson/call-me-cloud/issues"
+    "url": "https://github.com/CornelsonOrganization/call-me-cloud-public/issues"
   },
   "engines": {
     "node": ">=18.0.0"

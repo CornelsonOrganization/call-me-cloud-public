@@ -137,7 +137,7 @@ This is the easiest way to get started. Your laptop can be closed, you can be on
 1. **Copy the workflow file** to your repo:
    ```bash
    mkdir -p .github/workflows
-   curl -o .github/workflows/call.yml https://raw.githubusercontent.com/riverscornelson/call-me-cloud/main/.github/workflows/call.yml
+   curl -o .github/workflows/call.yml https://raw.githubusercontent.com/CornelsonOrganization/call-me-cloud-public/main/.github/workflows/call.yml
    ```
 
 2. **Add GitHub Secrets** (Settings → Secrets and variables → Actions → New repository secret):
@@ -196,7 +196,7 @@ Use this approach if you want Claude to call you from your local Claude Code or 
 
 #### 1. Deploy to Railway
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/riverscornelson/call-me-cloud)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/CornelsonOrganization/call-me-cloud-public)
 
 Or manually:
 1. Fork this repo
@@ -267,7 +267,7 @@ Want Claude to call you while working on any repository? Here's how to integrate
    ```bash
    mkdir -p .github/workflows
    curl -o .github/workflows/call.yml \
-     https://raw.githubusercontent.com/riverscornelson/call-me-cloud/main/.github/workflows/call.yml
+     https://raw.githubusercontent.com/CornelsonOrganization/call-me-cloud-public/main/.github/workflows/call.yml
    ```
 
 2. **Add GitHub Secrets** (Settings → Secrets → Actions):

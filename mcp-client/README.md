@@ -1,6 +1,6 @@
 # call-me-cloud-mcp
 
-MCP (Model Context Protocol) client that enables Claude to make phone calls via [Call-Me Cloud](https://github.com/riverscornelson/call-me-cloud).
+MCP (Model Context Protocol) client that enables Claude to make phone calls via [Call-Me Cloud](https://github.com/CornelsonOrganization/call-me-cloud-public).
 
 ## What is this?
 
@@ -67,7 +67,7 @@ end_call({ call_id: "call-1", message: "Sounds good, I'll get started. Talk soon
 ## Requirements
 
 - Node.js 18+
-- A deployed [Call-Me Cloud](https://github.com/riverscornelson/call-me-cloud) server
+- A deployed [Call-Me Cloud](https://github.com/CornelsonOrganization/call-me-cloud-public) server
 - Twilio account for phone calls
 - OpenAI API key (for speech-to-text and text-to-speech)
 
@@ -86,7 +86,7 @@ Claude Code  -->  This MCP Client  -->  Your Cloud Server  -->  Phone Call
 
 ## Server Setup
 
-See the main [Call-Me Cloud repository](https://github.com/riverscornelson/call-me-cloud) for server deployment instructions.
+See the main [Call-Me Cloud repository](https://github.com/CornelsonOrganization/call-me-cloud-public) for server deployment instructions.
 
 ## License
 

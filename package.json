@@ -17,6 +17,14 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CornelsonOrganization/call-me-cloud-public.git"
+  },
+  "homepage": "https://github.com/CornelsonOrganization/call-me-cloud-public#readme",
+  "bugs": {
+    "url": "https://github.com/CornelsonOrganization/call-me-cloud-public/issues"
+  },
   "dependencies": {
     "ioredis": "^5.9.2",
     "openai": "^6.16.0",
