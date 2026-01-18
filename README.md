@@ -347,6 +347,7 @@ Available when using Claude Code or MCP-compatible clients:
 | `continue_call` | Send message and wait for response |
 | `speak_to_user` | Speak without waiting |
 | `end_call` | End call with closing message |
+| `send_message` | Send WhatsApp message and wait for reply (optional) |
 
 ## GitHub Actions Base Prompts
 
