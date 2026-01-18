@@ -145,7 +145,8 @@ You'll need accounts with:
 - **[Railway](https://railway.app)** - Free tier: $5/month credit
 - **[Twilio](https://twilio.com)** - ~$1/mo phone + $0.014/min calls
 - **[OpenAI](https://platform.openai.com)** - ~$0.06/min for speech
-- **[Anthropic](https://console.anthropic.com)** - For GitHub Actions (usage-based)
+- **[Anthropic](https://console.anthropic.com)** - For Claude Code
+- Github
 
 ### Recommended: Setup with a Coding Agent
 
